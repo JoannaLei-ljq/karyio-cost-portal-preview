@@ -1,266 +1,325 @@
-/* Architecture Map: cost-relevant components only. */
+/* Architecture Map: cost-relevant components only.
+   Implementation status and projected cost are kept apart: status says what is built or confirmed,
+   cost comes from the model (model.js) at the current Simulator settings. */
 const KMap=(()=>{
+// Visible label is short; desc is the precise meaning, shown on demand.
 const STATUS = {
-  confirmed:{label:"Confirmed running", desc:"Checked by the team, or the confirmed service can't run without it"},
-  built:{label:"Built, runtime unverified", desc:"Built; not yet checked whether it's on or in use"},
-  unverified:{label:"Configured, state unknown", desc:"Set up to exist. Current state not confirmed"},
-  optional:{label:"Optional / dev only", desc:"Not on the normal app path"},
-  planned:{label:"Planned / future", desc:"Not built yet"}
+  confirmed:{label:"Running", desc:"Confirmed running by the team, or required by something that is confirmed running."},
+  built:{label:"Built", desc:"Built and configured, but not yet confirmed running in the deployed environment."},
+  unverified:{label:"To confirm", desc:"Set up in the deployment plan; its current deployed state hasn't been confirmed yet."},
+  optional:{label:"Optional", desc:"Development or occasional use only. Not on the normal app path."},
+  planned:{label:"Planned", desc:"Not built yet, or only partly built."}
 };
-const PTYPE = {aws:"AWS", ext:"External provider", apple:"Apple", self:"Inside our own services", dev:"Development / tooling"};
-const C1=20,C2=232,C3=444,C4=656,C5=900, W=170, H=48;
-// cost: line-item ids (or a provider name) in the cost model that this component drives
+// Forecast treatment, independent of status.
+const FC = {
+  inc:{label:"In forecast", desc:"Included in the monthly totals at the current Simulator settings."},
+  none:{label:"No direct cost", desc:"Has no charge of its own; it runs on, or is paid through, other items."},
+  excl:{label:"Not in forecast", desc:"Could cost something, but is not included in the monthly totals."}
+};
+const FEATS=["Chat","Voice","Medical RAG","Care Logs","Care Insights","Memory","Sign-in"];
+const ALL=FEATS;
+const DSK=["dDecider","dExec","dPair","dTitle","dLogSave","dLogDraft","dEvidence"];
+// cost: model line-item ids, or a provider name. fc: forecast treatment. a(v,r): plain-language cost assumptions.
 const NODES = [
- {id:"ios",x:C1,y:150,l:"iOS app",s:"client",st:"built",pt:"apple",d:"The app patients and caregivers install. Not on TestFlight yet; production sign-in is being connected.",cost:[]},
- {id:"testclients",x:C1,y:280,l:"Internal test clients",s:"dev tools",st:"optional",pt:"dev",d:"Internal testing tools that call the same backend. Development only, but any use triggers the same backend and AI costs as the app.",cost:[]},
- {id:"cognito",x:C2,y:40,l:"Cognito sign-in",s:"user accounts",st:"unverified",pt:"aws",d:"Login service, billed by monthly active users above the free tier. Verification and recovery emails are sent through an email service.",cost:["cognito","ses"]},
- {id:"alb",x:C2,y:150,l:"Load balancer + HTTPS",s:"ALB, certificate",st:"confirmed",pt:"aws",d:"Public HTTPS entry point with a managed certificate. Chat replies stream through it, so long connections count toward its usage.",cost:["alb"]},
- {id:"ipv4",x:C2,y:250,l:"Public IPs + traffic",s:"networking",st:"confirmed",pt:"aws",d:"Public IPv4 addresses (billed hourly) and outbound data transfer.",cost:["ipv4","xfer"]},
- {id:"budgets",x:C2,y:440,l:"Budgets / Cost Explorer",s:"cost alerts",st:"built",pt:"aws",d:"Budget email alerts and cost checks. No meaningful direct cost.",cost:[]},
- {id:"backend",x:C3,y:150,l:"Backend",s:"ECS Fargate",st:"confirmed",pt:"aws",d:"Java Spring Boot service. Runs chat, care logs, memory, the AI agents and background jobs. Confirmed running. It stays always on because scheduled jobs run every minute and hourly.",cost:["fargate"]},
- {id:"rag",x:C3,y:300,l:"RAG service",s:"EC2 + disk",st:"unverified",pt:"aws",d:"Python service that answers medical questions from a curated set of ALS guides. Runs on one small EC2 host.",cost:["ec2"]},
- {id:"rds",x:C4,y:40,l:"PostgreSQL + pgvector",s:"RDS",st:"unverified",pt:"aws",d:"The main database: users, logs, chats and memory vectors, with storage that can auto-grow and 7-day backups. Very likely running, because the confirmed backend needs it.",cost:["rds","rdsSt","rdsBk"]},
- {id:"cw",x:C4,y:120,l:"CloudWatch",s:"logs + alarms",st:"built",pt:"aws",d:"Application logs (30-day retention) and a deployment health alarm.",cost:["cw"]},
- {id:"comprehend",x:C4,y:200,l:"Comprehend Medical",s:"PHI detection",st:"built",pt:"aws",d:"AWS service that finds health identifiers so they can be removed before text goes to AI providers. Charged per 100-character unit; currently the largest usage-based cost.",cost:["dDecider","dExec","dPair","dTitle","dLogSave","dLogDraft","dEvidence"]},
- {id:"s3",x:C4,y:300,l:"S3 bucket",s:"RAG search bundle",st:"unverified",pt:"aws",d:"Stores the RAG search-index bundle (about 16 MB) that the RAG host loads at startup.",cost:["s3"]},
- {id:"ecr",x:C4,y:370,l:"ECR registry",s:"container images",st:"confirmed",pt:"aws",d:"Stores backend and RAG container images. Old image versions count as storage.",cost:["ecr"]},
- {id:"secrets",x:C4,y:440,l:"Secrets & config",s:"keys & settings",st:"built",pt:"aws",d:"Managed storage for API keys and settings.",cost:["secret"]},
- {id:"anthropic",x:C5,y:40,l:"Anthropic (Claude)",s:"Haiku 4.5 (+ Sonnet 5)",st:"built",pt:"ext",d:"Routes every chat turn and writes log extractions, titles, summaries and investigator steps. Sonnet is used only by a route that is off in the pilot.",cost:"Anthropic"},
- {id:"openai",x:C5,y:120,l:"OpenAI",s:"gpt-4o-mini",st:"built",pt:"ext",d:"Writes chat answers for most routes, Care Insights judge/critic steps, and RAG answers. Also the backup when Groq fails.",cost:"OpenAI"},
- {id:"voyage",x:C5,y:200,l:"Voyage AI",s:"embeddings + rerank",st:"built",pt:"ext",d:"Turns text into vectors (RAG questions and memory) and re-ranks RAG search results.",cost:"Voyage AI"},
- {id:"groq",x:C5,y:300,l:"Groq",s:"gpt-oss models",st:"built",pt:"ext",d:"Runs the RAG safety screen, question analysis and HyDE (about 3 calls per question). Falls back to OpenAI on errors.",cost:"Groq"},
- {id:"appledev",x:C1,y:548,l:"Apple Dev / TestFlight",s:"distribution",st:"planned",pt:"apple",d:"Needed to distribute the app on TestFlight. $99 per year.",cost:["apple"]},
- {id:"speech",x:C2,y:548,l:"Apple speech + voice",s:"on-device",st:"built",pt:"apple",d:"On-device speech-to-text and text-to-speech; no per-minute charge. Each spoken message still becomes a chat turn, which is where voice cost comes from. Voice is not yet in a TestFlight build.",cost:[]},
- {id:"gh",x:C3,y:548,l:"CI (GitHub Actions)",s:"build & test",st:"built",pt:"dev",d:"Automated backend tests. Within free allowances at current volume.",cost:[]},
- {id:"unstructured",x:C4,y:548,l:"Unstructured",s:"PDF parsing (offline)",st:"optional",pt:"ext",d:"Hosted PDF parsing, used only when the RAG content bundle is rebuilt.",cost:[]},
- {id:"eval",x:C5,y:548,l:"Evaluation runs",s:"AI quality tests",st:"optional",pt:"dev",d:"Agent and RAG quality tests. Each run makes real AI calls (see one-time costs in Assumptions & Pricing).",cost:[]}
+ {id:"ios",g:"app",l:"iOS app",s:"What patients and caregivers use",st:"built",fc:"none",
+  d:"The iPhone app people install.",role:"Every feature starts here. It sends messages, voice turns and care logs to the backend and shows the replies.",uses:ALL,
+  a:()=>"The app itself has no running cost. Its usage drives the backend, AI and privacy costs. Not on TestFlight yet; production sign-in is being connected."},
+ {id:"speech",g:"app",l:"Apple speech & voice",s:"Speech runs on the phone",st:"built",fc:"none",
+  d:"Apple's on-device speech-to-text and read-aloud.",role:"Lets people talk instead of type. Speech is turned into text on the phone, then sent like a chat message.",uses:["Voice"],
+  a:()=>"No per-minute charge. Each spoken message becomes a chat turn, so voice cost shows up under Chat & RAG. Voice is not in a TestFlight build yet."},
+ {id:"alb",g:"infra",l:"Load balancer + HTTPS",s:"Secure front door",st:"confirmed",fc:"inc",cost:["alb"],
+  d:"The public HTTPS entry point, with a managed certificate.",role:"Receives every request from the app and passes it to the backend. Chat replies stream back through it.",uses:ALL,
+  a:()=>`Hourly charge × 730 h, plus ${A.lcu} average capacity units (assumption). The certificate is free.`},
+ {id:"ipv4",g:"infra",l:"Public IPs + traffic",s:"Internet addresses and data out",st:"confirmed",fc:"inc",cost:["ipv4","xfer"],
+  d:"Public IPv4 addresses and outbound data transfer.",role:"Makes the service reachable and carries replies to phones.",uses:ALL,
+  a:(v,r)=>`${v.ips} addresses × $0.005/hour. Data out is free up to 100 GB a month (≈ ${num(r.xGb,1)} GB projected).`},
+ {id:"secrets",g:"infra",l:"Secrets & config",s:"Keys and settings",st:"built",fc:"inc",cost:["secret"],
+  d:"Managed storage for API keys and settings.",role:"Keeps provider keys out of the code and hands them to the services at start-up.",uses:ALL,
+  a:()=>"1 secret × $0.40 a month."},
+ {id:"backend",g:"core",l:"Backend",s:"The brain of the service",st:"confirmed",fc:"inc",cost:["fargate"],
+  d:"The main server (Java Spring Boot on AWS Fargate).",role:"Runs chat, care logs, memory, the AI agents and scheduled jobs, and calls every other service.",uses:ALL,
+  a:v=>`${v.tasks} task × ${v.vcpu} vCPU × ${v.mem} GB, always on (730 h/month) because scheduled jobs run every minute. Sizing under load is unmeasured.`},
+ {id:"rag",g:"core",l:"Medical RAG service",s:"Answers medical questions",st:"unverified",fc:"inc",cost:["ec2"],
+  d:"A Python service that answers ALS questions from a curated set of guides.",role:"Finds the relevant guide passages and writes a cited answer.",uses:["Medical RAG"],
+  a:v=>v.ragHost?"One small EC2 host (t3.small) + 8 GB disk, always on. Its AI calls are counted under AI & Privacy.":"The Simulator option “RAG runs on its own EC2 host” is off, so no host cost is included."},
+ {id:"cognito",g:"core",l:"Sign-in (Cognito)",s:"User accounts",st:"unverified",fc:"inc",cost:["cognito","ses"],
+  d:"AWS's login service, plus the email service that sends verification and recovery emails.",role:"Creates accounts and checks who is signed in.",uses:["Sign-in"],
+  a:(v,r)=>`Projected for the planned setup, not for what is deployed today. Cognito is free below 10,000 monthly active users (≈ ${num(r.users)} projected), so only emails cost anything: 2 per new user × $0.10 per 1,000. That's why this is tiny.`},
+ {id:"anthropic",g:"ai",l:"Anthropic (Claude)",s:"Routing, summaries, log drafting",st:"built",fc:"inc",cost:"Anthropic",
+  d:"Claude Haiku 4.5 (Sonnet 5 only on a route that is off in the pilot).",role:"Decides how to handle each chat turn and writes summaries, titles, log extractions and Care Insights investigations.",uses:["Chat","Voice","Medical RAG","Care Logs","Care Insights","Memory"],
+  a:(v,r)=>`$1 / $5 per million input / output tokens. ≈ ${num(r.turns)} chat turns and ${num(r.logs)} logs this month. Token sizes are partly measured.`},
+ {id:"openai",g:"ai",l:"OpenAI",s:"Writes most replies",st:"built",fc:"inc",cost:"OpenAI",
+  d:"gpt-4o-mini.",role:"Writes chat replies, medical answers and Care Insights judge/critic steps. Backup when Groq fails.",uses:["Chat","Voice","Medical RAG","Care Insights"],
+  a:()=>`$0.15 / $0.60 per million tokens. Medical answer length comes from a synthetic evaluation.`},
+ {id:"groq",g:"ai",l:"Groq",s:"Fast checks on medical questions",st:"built",fc:"inc",cost:"Groq",
+  d:"gpt-oss models.",role:"Screens and rewrites each medical question (about 3 calls per question).",uses:["Medical RAG"],
+  a:v=>v.groqFree?"The Simulator option “Groq covered by its free quota” is on, so Groq costs $0.":"$0.075 / $0.30 per million tokens; 10% of calls assumed to fail over to OpenAI."},
+ {id:"voyage",g:"ai",l:"Voyage AI",s:"Search and memory vectors",st:"built",fc:"inc",cost:"Voyage AI",
+  d:"Embeddings and re-ranking.",role:"Turns text into vectors so Karyio can search guides and remember past chats and logs.",uses:["Medical RAG","Memory","Care Logs"],
+  a:()=>"$0.18 per million tokens for embeddings, $0.02 for re-ranking. Very small at pilot scale."},
+ {id:"comprehend",g:"ai",l:"Comprehend Medical",s:"Removes health identifiers",st:"built",fc:"inc",cost:DSK,
+  d:"AWS's medical de-identification service (DetectPHI).",role:"Finds names, dates and other identifiers so they can be removed before text goes to AI providers.",uses:["Chat","Voice","Memory","Care Logs","Care Insights"],
+  a:(v,r)=>v.comprehendOn?`≈ ${num(r.dphiU)} units of 100 characters this month at $0.0014 each (official price). The price is verified; how much text gets scanned is an assumption. Usually the largest usage cost.`:"Switched off in the Simulator (what-if), so no cost is included."},
+ {id:"rds",g:"data",l:"Database (PostgreSQL)",s:"Users, chats, logs, memory",st:"unverified",fc:"inc",cost:["rds","rdsSt","rdsBk"],
+  d:"Amazon RDS PostgreSQL with pgvector.",role:"Stores everything people enter, plus memory vectors and usage records.",uses:ALL,
+  a:(v,r)=>`db.t4g.micro instance always on, ${r.alloc} GB allocated storage (database ≈ ${num(r.dbGb,2)} GB; storage is billed by allocation). Backups are free up to the allocated size. Very likely running, because the confirmed backend needs it.`},
+ {id:"s3",g:"data",l:"File storage (S3)",s:"Medical guide search index",st:"unverified",fc:"inc",cost:["s3"],
+  d:"Amazon S3 bucket.",role:"Holds the ALS guide search bundle that the RAG service loads at start-up.",uses:["Medical RAG"],
+  a:()=>"About 16 MB stored, a fraction of a cent a month."},
+ {id:"ecr",g:"data",l:"Container images (ECR)",s:"Packaged software",st:"confirmed",fc:"inc",cost:["ecr"],
+  d:"Amazon ECR registry.",role:"Stores the packaged backend and RAG software that AWS runs.",uses:ALL,
+  a:()=>"About 0.5 GB of images at $0.10 per GB-month."},
+ {id:"cw",g:"data",l:"Logs & alarms (CloudWatch)",s:"Operational logs",st:"built",fc:"inc",cost:["cw"],
+  d:"Amazon CloudWatch.",role:"Keeps application logs and a deployment health alarm.",uses:ALL,
+  a:(v,r)=>`≈ ${num(r.cwGb,2)} GB of logs a month, first 5 GB of ingestion free, ${v.logRet}-day retention.`},
+ {id:"appledev",g:"tools",l:"Apple Developer / TestFlight",s:"App distribution",st:"planned",fc:"inc",cost:["apple"],
+  d:"Apple Developer Program membership.",role:"Needed to put the app on TestFlight for pilot users.",uses:["App distribution"],
+  a:v=>v.apple?"$99 a year, spread monthly. Included even though it's planned, because the pilot needs it.":"Excluded by the Simulator option “Include Apple Developer fee”."},
+ {id:"budgets",g:"tools",l:"Budgets & cost checks",s:"Spending alerts",st:"built",fc:"excl",
+  d:"AWS Budgets and Cost Explorer.",role:"Emails the team when spending crosses a threshold.",uses:["Cost monitoring"],
+  a:()=>"Not in the forecast; expected to be negligible."},
+ {id:"gh",g:"tools",l:"CI (GitHub Actions)",s:"Automated tests",st:"built",fc:"excl",
+  d:"Continuous integration.",role:"Builds and tests the backend on every change.",uses:["Development"],
+  a:()=>"Not in the forecast; expected to stay within free allowances."},
+ {id:"eval",g:"tools",l:"Evaluation runs",s:"AI quality tests",st:"optional",fc:"excl",
+  d:"Agent and RAG quality test suites.",role:"Checks answer quality and safety before releases.",uses:["Quality testing"],
+  a:()=>"Not in the monthly forecast. Each run makes real AI calls; the per-run cost is listed under Assumptions & Pricing → One-time costs."},
+ {id:"unstructured",g:"tools",l:"Unstructured",s:"PDF parsing for guide updates",st:"optional",fc:"excl",
+  d:"Hosted PDF parsing.",role:"Used only when the ALS guide collection is rebuilt.",uses:["Content updates"],
+  a:()=>"Not in the forecast; occasional, per rebuild."},
+ {id:"testclients",g:"tools",l:"Internal test clients",s:"Team testing tools",st:"optional",fc:"none",
+  d:"Internal tools that call the same backend.",role:"Let the team test without the iPhone app.",uses:["Development"],
+  a:()=>"No cost of their own, but their chats cost the same as app chats."}
 ];
+const GROUPS={
+ app:{t:"User-facing app",d:"What people hold in their hands"},
+ infra:{t:"Cloud entry & infrastructure",d:"How requests reach Karyio safely"},
+ core:{t:"Core backend",d:"Where the work happens"},
+ ai:{t:"AI & privacy",d:"Paid per use: grows with activity"},
+ data:{t:"Data & storage",d:"What Karyio keeps"},
+ tools:{t:"Supporting tools",d:"Distribution, testing and monitoring, off the main path"}
+};
 const EDGES = [
- ["ios","alb"],["ios","cognito","planned"],["testclients","alb","dev"],
- ["alb","backend"],["ipv4","backend"],["backend","cognito"],["backend","rds"],["backend","cw"],["backend","comprehend"],
+ ["ios","alb"],["ios","cognito"],["testclients","alb"],["alb","backend"],["ipv4","backend"],["backend","cognito"],["backend","rds"],["backend","cw"],["backend","comprehend"],
  ["backend","secrets"],["backend","rag"],["backend","anthropic"],["backend","openai"],["backend","voyage"],
  ["rag","groq"],["rag","openai"],["rag","voyage"],["rag","s3"],["rag","secrets"],["ecr","backend"],["ecr","rag"],
- ["speech","ios"],["appledev","ios","planned"],["unstructured","s3","dev"],["eval","backend","dev"],["gh","ecr","dev"]
+ ["speech","ios"],["appledev","ios"],["unstructured","s3"],["eval","backend"],["gh","ecr"]
 ];
 const FUTURE = [
- {id:"F1",tier:"near",t:"Real iOS login & sign-up",d:"Connect iOS to Cognito: sign-up, email verification, password recovery.",cost:"Cognito active users; verification and recovery emails.",dep:["cognito","ios","backend"]},
- {id:"F2",tier:"confirm",t:"Onboarding, consent & account lifecycle",d:"Recorded privacy/terms consent, account deletion and export.",cost:"Mostly database work; a hosted privacy policy page.",dep:["backend","rds","cognito","ios"]},
+ {id:"F1",tier:"near",t:"Real iOS login & sign-up",d:"Connect iOS to Cognito: sign-up, email verification, password recovery.",cost:"Cognito active users; verification and recovery emails. Already projected in the forecast for the planned setup.",dep:["cognito","ios","backend"]},
  {id:"F3",tier:"near",t:"Shared workspaces & invitations",d:"Invite codes, roles and membership exist. Inviting a caregiver by email is not built yet.",cost:"Database only today. Email invites would add an email-sending dependency.",dep:["backend","rds"]},
- {id:"F5",tier:"near",t:"Production voice & voice-driven logging",d:"Ship Voice Mode in release builds, voice-to-care-log, accessibility.",cost:"No metered speech provider. Each spoken turn costs the same as a typed chat turn.",dep:["speech","ios","backend","anthropic"]},
+ {id:"F5",tier:"near",t:"Production voice & voice-driven logging",d:"Ship Voice Mode in release builds, voice-to-care-log, accessibility.",cost:"No metered speech provider. Each spoken turn costs the same as a typed chat turn (already modeled through voice minutes).",dep:["speech","ios","backend","anthropic"]},
+ {id:"F9",tier:"near",t:"Usage limits & cost controls",d:"Usage is recorded today. Hard caps were approved in principle; values are still open.",cost:"Provider spend limits; a custom metric and alarm; budget actions; in-app rate limiting.",dep:["backend","budgets","cw","anthropic","openai"]},
+ {id:"F2",tier:"confirm",t:"Onboarding, consent & account lifecycle",d:"Recorded privacy/terms consent, account deletion and export.",cost:"Mostly database work; a hosted privacy policy page.",dep:["backend","rds","cognito","ios"]},
  {id:"F6",tier:"confirm",t:"Analytics, crash reporting & pilot feedback",d:"No analytics or crash SDK yet. TestFlight has built-in feedback and crash logs.",cost:"Possibly a third-party SDK (to be decided); dashboards and alarms.",dep:["ios","cw","appledev"]},
+ {id:"F11",tier:"confirm",t:"Custom domain & DNS",d:"The app uses a free AWS-generated HTTPS address today. A branded domain is optional.",cost:"Domain registration and DNS hosting.",dep:["alb"]},
  {id:"F7",tier:"road",t:"Safety evaluation & ongoing AI quality",d:"Scheduled evaluations and citation checks.",cost:"Eval runs make real AI calls; CI runner time.",dep:["eval","anthropic","openai","gh"]},
  {id:"F8",tier:"road",t:"Data retention, deletion & recovery",d:"Retention and erasure policies and their implementation.",cost:"Longer backups or snapshots; possibly additional managed encryption keys; more de-identification if coverage widens.",dep:["comprehend","rds","cw","secrets"]},
- {id:"F9",tier:"near",t:"Usage limits & cost controls",d:"Usage is recorded today. Hard caps were approved in principle; values are still open.",cost:"Provider spend limits; a custom metric and alarm; budget actions; in-app rate limiting.",dep:["backend","budgets","cw","anthropic","openai"]},
  {id:"F10",tier:"road",t:"Scaling for an external caregiver pilot",d:"Moving beyond internal testers.",cost:"More AI usage; possibly larger or extra backend tasks; database high availability; support time.",dep:["backend","rds","rag","alb"]},
- {id:"F11",tier:"confirm",t:"Custom domain & DNS",d:"The app uses a free AWS-generated HTTPS address today. A branded domain is optional.",cost:"Domain registration and DNS hosting.",dep:["alb"]},
  {id:"F12",tier:"road",t:"Automated RAG build & deploy",d:"Automate the RAG image rebuild and deployment.",cost:"CI runner time; image storage.",dep:["gh","ecr","rag"]}
 ];
-const SHARED = ["Load balancer + HTTPS","Backend (always on)","Public IPs","PostgreSQL (RDS)","CloudWatch logs","Secrets & config","Container images","RAG host (shared by RAG features)"];
+const TIERS={near:["Agreed near-term","Needed for the pilot"],confirm:["Needs a decision","An open question or option"],road:["Longer-term","Needed before a wider rollout"]};
+// Feature flows. Step types: always / cond / async / planned / local. cost(r): projected cost of the feature at current settings.
+const featSum=(r,fs)=>Object.values(r.c).filter(x=>fs.includes(x.feat)).reduce((s,x)=>s+x.val,0);
 const FLOWS = [
- {id:"chat",t:"Chat (ordinary turn)",sub:"Typed message to the assistant",steps:[
-  ["iOS → Load balancer → Backend","Message sent; reply streams back","always","AWS (shared)"],
-  ["Crisis safety check","Deterministic check before anything else; no AI call","local","Backend"],
-  ["Route decision","One Claude Haiku call picks the route (skipped for some shortcuts and crisis replies)","always","Anthropic"],
-  ["De-identification","Comprehend Medical scans text on routes that send personal context out","cond","AWS Comprehend Medical"],
-  ["Route answer","gpt-4o-mini writes the reply on most routes","cond","OpenAI"],
-  ["Save messages + usage record","Stored in PostgreSQL","always","RDS (shared)"],
-  ["Chat title","Claude call when a new chat needs a title","async","Anthropic"],
-  ["Chat summary → memory","Summary, de-identification and an embedding, stored for recall","async","Anthropic · Comprehend · Voyage"]]},
- {id:"rag",t:"RAG question",sub:"Medical / ALS-guide question",steps:[
-  ["Route decision","Backend picks the technical route","always","Anthropic"],
-  ["Backend → RAG service","Internal service call","always","AWS EC2 (shared)"],
-  ["Safety screen","Fast check of the question","always","Groq (OpenAI if Groq fails)"],
-  ["Analysis + HyDE","Classify/rewrite and a hypothetical answer: 2 calls","always","Groq (OpenAI if Groq fails)"],
-  ["Embed the question","One embedding request","always","Voyage"],
-  ["Local search","Vector + keyword search over the bundle; no outside call","local","RAG service"],
-  ["Rerank","Re-score about 30 candidates","always","Voyage"],
-  ["Write the answer","gpt-4o-mini","always","OpenAI"],
-  ["Citation check","Local verification of citations","local","RAG service"],
-  ["Retries / failover","Extra attempts when a provider errors or rate-limits","cond","Groq · OpenAI · Voyage"]]},
- {id:"voice",t:"Voice",sub:"Speak instead of type",steps:[
-  ["Speech → text on the phone","Apple on-device recognition; no metered provider","local","Apple"],
-  ["Same as a Chat turn","Each spoken message costs the same as a typed one (and a RAG question if it routes there)","always","See Chat / RAG"],
-  ["Reply read aloud","Apple text-to-speech on the phone","local","Apple"],
-  ["Available in TestFlight builds","Not in a release build yet","planned","iOS release work"]]},
- {id:"logs",t:"Care Logs",sub:"Manual, AI-assisted, or from chat",steps:[
-  ["Save a log","Stored in PostgreSQL (manual form)","always","RDS (shared)"],
-  ["AI-assisted: parse a description","De-identify, then Claude extracts fields (draft only)","cond","Comprehend · Anthropic"],
-  ["From chat","The log-type classifier and draft extraction run","cond","Anthropic"],
-  ["Log summary","Claude summary only when notes are present","async","Anthropic"],
-  ["Memory embedding","De-identify and embed for later recall","async","Comprehend · Voyage"],
-  ["Wake the reflection agent","Counts toward Care Insights triggers","async","See Care Insights"]]},
- {id:"memory",t:"Memory & recall",sub:"Remembering past chats and logs",steps:[
-  ["Summaries","Chat and log summaries (see Chat and Care Logs)","async","Anthropic"],
-  ["Embeddings stored","Vectors stored in pgvector; database storage grows","async","Voyage · RDS"],
-  ["Recall","Query embedding plus about 3 Claude calls per recall turn","cond","Voyage · Anthropic"],
-  ["Memory search for context","Vector search inside the database","local","RDS (shared)"]]},
- {id:"insights",t:"Care Insights",sub:"Background reflection agent",steps:[
-  ["Triggered by new logs","Runs after a threshold of new inputs, urgent signals, or an hourly sweep","async","Backend"],
+ {id:"chat",t:"Chat",sub:"Someone types a message to the assistant",cost:r=>featSum(r,["Chat","Memory"]),costNote:"Chat + memory summaries of each turn.",steps:[
+  ["App → load balancer → backend","Message sent; the reply streams back","always","Shared infrastructure"],
+  ["Crisis safety check","Checked first, with fixed rules; no AI call","local","Backend"],
+  ["Route decision","One Claude call decides how to handle the message","always","Anthropic"],
+  ["Remove health identifiers","Comprehend Medical scans the text before it leaves","cond","Comprehend Medical"],
+  ["Write the reply","gpt-4o-mini writes the answer on most routes","cond","OpenAI"],
+  ["Save the conversation","Stored in the database","always","Shared infrastructure"],
+  ["Title a new chat","One small Claude call for a new conversation","async","Anthropic"],
+  ["Remember it","Summary, de-identification and an embedding, kept for later","async","Anthropic · Comprehend · Voyage"]]},
+ {id:"voice",t:"Voice",sub:"Someone speaks instead of typing",cost:r=>voiceCost(r),costNote:"Part of Chat & RAG, not extra: the share of chat cost triggered by spoken turns.",overlap:true,steps:[
+  ["Speech → text on the phone","Apple on-device recognition","local","Apple (on device)"],
+  ["Handled like a chat message","Same route, reply and memory steps as Chat (or Medical RAG)","always","See Chat / Medical RAG"],
+  ["Reply read aloud","Apple text-to-speech on the phone","local","Apple (on device)"],
+  ["In TestFlight builds","Not in a release build yet","planned","iOS release work"]]},
+ {id:"rag",t:"Medical RAG",sub:"Someone asks an ALS or medical question",cost:r=>featSum(r,["RAG"]),costNote:"RAG AI calls and its dedicated host. The route decision and memory summary of these turns are counted under Chat.",steps:[
+  ["Route decision","The backend picks the medical-question route","always","Anthropic",["shared","Counted under Chat"]],
+  ["Backend → RAG service","Internal call to the RAG host","always","RAG host (dedicated)",["fixed","Fixed cost, in this feature"]],
+  ["Safety screen","Quick check of the question","always","Groq"],
+  ["Understand the question","Classify, rewrite and draft a hypothetical answer: 2 calls","always","Groq (OpenAI if Groq fails)"],
+  ["Search the guides","Embed the question, search locally, re-rank 30 passages","always","Voyage"],
+  ["Write the cited answer","gpt-4o-mini","always","OpenAI"],
+  ["Check citations","Done locally","local","RAG service"]]},
+ {id:"logs",t:"Care Logs",sub:"Someone records symptoms, meds or events",cost:r=>featSum(r,["Care logs"]),costNote:"AI help, summaries, memory and de-identification for logs.",steps:[
+  ["Save the log","Stored in the database","always","Shared infrastructure"],
+  ["AI help (optional)","De-identify, then Claude drafts the fields from a description","cond","Comprehend · Anthropic"],
+  ["Summarize notes","Claude summary when notes are present","async","Anthropic"],
+  ["Remember it","De-identify and embed for later recall","async","Comprehend · Voyage"],
+  ["Wake Care Insights","Counts toward the next insight run","async","See Care Insights"]]},
+ {id:"insights",t:"Care Insights",sub:"Background agent that looks for patterns",cost:r=>featSum(r,["Care Insights"]),costNote:"Judge, investigator and critic runs, plus re-scanning log notes.",steps:[
+  ["Triggered by new logs","After a few new inputs, an urgent signal or the hourly sweep","async","Backend"],
   ["Judge","gpt-4o-mini decides whether to act","async","OpenAI"],
-  ["Investigator","Claude Haiku looks into the data","async","Anthropic"],
+  ["Investigate","Claude looks into the recent data","async","Anthropic"],
   ["Critic","gpt-4o-mini reviews the result","async","OpenAI"],
-  ["Run limits","Per-run ceiling and daily cap limit how much it does","local","Backend"]]},
- {id:"reports",t:"Weekly Reports",sub:"Scheduled summaries",steps:[
-  ["Hourly sweeps","Scheduled database work","async","Backend · RDS"],
-  ["Report content","Comes from the reflection agent; no AI call of its own today","cond","See Care Insights"]]},
- {id:"login",t:"Login & accounts",sub:"Sign-up, sign-in, recovery",steps:[
-  ["Sign-up / sign-in in iOS","Being connected","planned","Cognito"],
-  ["Verification and recovery emails","Sent on sign-up and recovery","planned","Cognito / email service"],
-  ["Token check on each request","Checked locally with cached keys; no per-request charge expected","always","Backend"],
-  ["Register user / workspace","Rows in PostgreSQL","always","RDS (shared)"]]},
- {id:"jobs",t:"Background jobs",sub:"Things that run without a user",steps:[
-  ["Housekeeping","Every minute, database only","async","Backend · RDS"],
-  ["Reflection and report sweeps","Hourly; can start Care Insights runs","async","Backend"],
-  ["Keeps the backend always on","These jobs are why the backend can't scale to zero","always","AWS compute (shared)"]]}
+  ["Run limits","Per-run ceiling and daily cap","local","Backend"]]},
+ {id:"login",t:"Sign-in",sub:"Sign-up, sign-in and recovery",cost:r=>featSum(r,["Login"]),costNote:"Projected for the planned setup: free below 10,000 monthly users, so only emails cost anything.",steps:[
+  ["Sign up / sign in","Being connected in the app","planned","Cognito"],
+  ["Verification & recovery emails","Sent on sign-up and recovery","planned","Email service"],
+  ["Check sign-in on each request","Done locally with cached keys; no per-request charge","always","Backend"],
+  ["Create the account","Rows in the database","always","Shared infrastructure"]]},
+ {id:"memory",more:true,t:"Memory & recall",sub:"Remembering past chats",cost:r=>featSum(r,["Memory"]),costNote:"Chat summaries and recall. Already included in the Chat figure.",overlap:true,steps:[
+  ["Summaries","Chat summaries (see Chat)","async","Anthropic"],
+  ["Store vectors","Kept in the database","async","Voyage · Database"],
+  ["Recall","A query embedding and about 3 Claude calls per recall turn","cond","Voyage · Anthropic"]]},
+ {id:"reports",more:true,t:"Weekly reports",sub:"Scheduled summaries",cost:null,costNote:"No AI call of its own today; content comes from Care Insights.",steps:[
+  ["Hourly sweeps","Scheduled database work","async","Shared infrastructure"],
+  ["Report content","Comes from Care Insights","cond","See Care Insights"]]},
+ {id:"jobs",more:true,t:"Background jobs",sub:"Things that run with no one using the app",cost:null,costNote:"Part of shared infrastructure: they're why the backend stays always on.",steps:[
+  ["Housekeeping","Every minute, database only","async","Shared infrastructure"],
+  ["Insight and report sweeps","Hourly","async","Backend"],
+  ["Keeps the backend always on","The backend can't scale to zero","always","Shared infrastructure"]]}
 ];
+const TY={always:"Every time",cond:"Sometimes",async:"In background",planned:"Planned",local:"No extra cost"};
+const stepCost=s=>s[4]?s[4]:s[2]==="local"?["none","No extra cost"]:s[2]==="planned"?["plan","Planned"]:/Shared infrastructure|Backend$|RAG host|^See /.test(s[3])?["shared","Shared / counted elsewhere"]:["use","Usage cost"];
+// Inventory: cat, name, desc, provider, status, forecast, cost keys
 const INV = [
- ["Compute & hosting","Backend container (ECS Fargate)","Runs the backend 24/7. Cost depends on size and uptime.","AWS","confirmed"],
- ["Compute & hosting","Extra tasks (scaling and deploy overlap)","A second task may run during deploys or busy periods.","AWS","built"],
- ["Compute & hosting","Always-on background jobs","Scheduled jobs mean the backend can't sleep. Drives uptime, not a separate bill.","Inside our services","built"],
- ["Compute & hosting","RAG host (EC2) and disk (EBS)","One small server running the RAG service.","AWS","unverified"],
- ["Networking & HTTPS","Load balancer (ALB)","Public HTTPS entry. Long chat streams add to its usage.","AWS","confirmed"],
- ["Networking & HTTPS","HTTPS certificate","Managed certificate; no charge.","AWS","confirmed"],
- ["Networking & HTTPS","Public IP addresses","Billed per address-hour.","AWS","confirmed"],
- ["Networking & HTTPS","Data transfer","Traffic to the internet; first 100 GB a month free.","AWS","unverified"],
- ["Database & storage","PostgreSQL instance (RDS)","The main database server.","AWS","unverified"],
- ["Database & storage","Database storage","Billed by allocated size; auto-grows as logs, chats and memory accumulate.","AWS","unverified"],
- ["Database & storage","Database backups","7-day automatic backups; free up to the allocated size.","AWS","unverified"],
- ["Database & storage","S3 bucket for the RAG bundle","Stores the search-index bundle.","AWS","unverified"],
- ["Database & storage","Container image registry (ECR)","Stores images; old versions add storage.","AWS","confirmed"],
- ["Identity","Cognito user pool","Login service; billed by monthly active users above the free tier.","AWS","unverified"],
- ["Identity","Secrets & configuration","Managed storage for keys and settings.","AWS","built"],
- ["AI models","Claude Haiku 4.5","Routing, log extraction, titles, summaries, investigator.","Anthropic","built"],
- ["AI models","Claude Sonnet 5","Only used by a route that is off in the pilot.","Anthropic","optional"],
- ["AI models","OpenAI gpt-4o-mini","Chat answers, Care Insights judge and critic, RAG answers, Groq fallback.","OpenAI","built"],
- ["AI models","Groq (RAG analysis)","Safety screen, classify/rewrite and HyDE: about 3 calls per question.","Groq","built"],
- ["AI models","Retries & failover overhead","Extra paid attempts when a provider errors or rate-limits.","Several","built"],
- ["Retrieval & embeddings","Voyage embeddings","RAG questions and backend memory.","Voyage AI","built"],
- ["Retrieval & embeddings","Voyage rerank","Re-scores RAG search results.","Voyage AI","built"],
- ["Retrieval & embeddings","Local search (vector + keyword, pgvector)","Runs inside our own services; no vector-database subscription.","Inside our services","built"],
- ["Privacy","Comprehend Medical (DetectPHI)","Finds health identifiers before text goes to AI providers. Charged per 100-character unit.","AWS","built"],
- ["Monitoring & cost control","CloudWatch logs and alarm","Application logs (30 days) and a deployment health alarm.","AWS","built"],
- ["Monitoring & cost control","Budgets & cost checks","Budget email alerts; cost queries.","AWS","built"],
- ["Monitoring & cost control","In-app usage meter","Records model spend per user. Warns; doesn't block.","Inside our services","built"],
- ["Distribution & development","Apple Developer Program / TestFlight","Needed to distribute through TestFlight.","Apple","planned"],
- ["Distribution & development","Apple on-device speech & voice","No metered provider.","Apple","built"],
- ["Distribution & development","CI (GitHub Actions)","Automated tests.","GitHub","built"],
- ["Distribution & development","Evaluation runs","Quality tests; each run makes real AI calls.","Several","optional"],
- ["Distribution & development","Development & demo AI usage","Local and demo environments use the same AI providers.","Several","optional"],
- ["Content pipeline (offline)","PDF parsing and corpus re-embedding","Only when the ALS guide bundle is rebuilt.","Unstructured · Voyage AI","optional"]
+ ["Compute & hosting","Backend container (ECS Fargate)","Runs the backend 24/7. Cost depends on size and uptime.","AWS","confirmed","inc",["fargate"]],
+ ["Compute & hosting","Extra backend tasks","A second task during deploys or busy periods. Included only if you raise “Backend tasks” in the Simulator.","AWS","built","excl"],
+ ["Compute & hosting","Always-on background jobs","Why the backend can't sleep. Drives uptime, not a separate bill.","Inside our services","built","none"],
+ ["Compute & hosting","RAG host (EC2) and disk","One small server running the RAG service.","AWS","unverified","inc",["ec2"]],
+ ["Networking & HTTPS","Load balancer","Public HTTPS entry. Long chat streams add to its usage.","AWS","confirmed","inc",["alb"]],
+ ["Networking & HTTPS","HTTPS certificate","Managed certificate; free.","AWS","confirmed","none"],
+ ["Networking & HTTPS","Public IP addresses","Billed per address-hour.","AWS","confirmed","inc",["ipv4"]],
+ ["Networking & HTTPS","Data transfer out","First 100 GB a month free.","AWS","unverified","inc",["xfer"]],
+ ["Database & storage","Database instance (RDS)","The main database server.","AWS","unverified","inc",["rds"]],
+ ["Database & storage","Database storage","Billed by allocated size; auto-grows as data accumulates.","AWS","unverified","inc",["rdsSt"]],
+ ["Database & storage","Database backups","7-day backups; free up to the allocated size.","AWS","unverified","inc",["rdsBk"]],
+ ["Database & storage","S3 bucket (RAG bundle)","Stores the search-index bundle.","AWS","unverified","inc",["s3"]],
+ ["Database & storage","Container images (ECR)","Old versions add storage.","AWS","confirmed","inc",["ecr"]],
+ ["Identity","Sign-in (Cognito) and emails","Free below 10,000 monthly active users; emails per new user.","AWS","unverified","inc",["cognito","ses"]],
+ ["Identity","Secrets & configuration","Managed storage for keys and settings.","AWS","built","inc",["secret"]],
+ ["AI models","Claude Haiku 4.5","Routing, log extraction, titles, summaries, investigator.","Anthropic","built","inc","Anthropic"],
+ ["AI models","Claude Sonnet 5","Only used by a route that is off in the pilot.","Anthropic","optional","excl"],
+ ["AI models","OpenAI gpt-4o-mini","Chat replies, Care Insights judge and critic, RAG answers, Groq fallback.","OpenAI","built","inc","OpenAI"],
+ ["AI models","Groq (RAG analysis)","Safety screen, classify/rewrite and HyDE: about 3 calls per question.","Groq","built","inc","Groq"],
+ ["AI models","Retries & failover","Groq→OpenAI failover is modeled; other retries are not.","Several","built","inc",["ragFail"]],
+ ["Search & embeddings","Voyage embeddings","RAG questions, chat summaries and log memory.","Voyage AI","built","inc",["ragEmb","sumEmb","logEmb"]],
+ ["Search & embeddings","Voyage re-ranking","Re-scores RAG search results.","Voyage AI","built","inc",["ragRr"]],
+ ["Search & embeddings","Local search (vector + keyword)","Runs inside our own services; no subscription.","Inside our services","built","none"],
+ ["Privacy","Comprehend Medical (DetectPHI)","Finds health identifiers before text goes to AI providers. Per 100-character unit.","AWS","built","inc",DSK],
+ ["Monitoring & cost control","Logs & alarm (CloudWatch)","Application logs and a deployment health alarm.","AWS","built","inc",["cw"]],
+ ["Monitoring & cost control","Budgets & cost checks","Budget email alerts; cost queries. Expected negligible.","AWS","built","excl"],
+ ["Monitoring & cost control","In-app usage meter","Records model spend per user. Warns; doesn't block.","Inside our services","built","none"],
+ ["Distribution & development","Apple Developer Program","Needed for TestFlight. $99 a year.","Apple","planned","inc",["apple"]],
+ ["Distribution & development","Apple on-device speech","No metered provider.","Apple","built","none"],
+ ["Distribution & development","CI (GitHub Actions)","Automated tests; expected within free allowances.","GitHub","built","excl"],
+ ["Distribution & development","Evaluation runs","Each run makes real AI calls. Per-run cost under One-time costs.","Several","optional","excl"],
+ ["Distribution & development","Development & demo AI usage","Local and demo environments use the same AI providers.","Several","optional","excl"],
+ ["Distribution & development","Internal test clients","Use the same backend; their chats cost like app chats.","Inside our services","optional","none"],
+ ["Content updates (offline)","PDF parsing and re-embedding","Only when the ALS guide collection is rebuilt.","Unstructured · Voyage AI","optional","excl"]
 ];
-FUTURE.forEach(f=>INV.push(["Planned / future",f.t,f.d+" Possible cost sources: "+f.cost,"To be decided","planned"]));
+FUTURE.forEach(f=>INV.push(["Future features",f.t,f.d+" Possible cost: "+f.cost,"To be decided","planned","excl"]));
 
-let map, getRun=()=>null;
-function mel(tag,attrs,parent){const e=document.createElementNS(NS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);(parent||map).appendChild(e);return e;}
-const GROUPS=[
- {x:6,y:126,w:198,h:262,f:"--g-client",b:"--g-client-b",l:"Clients"},
- {x:218,y:14,w:640,h:492,f:"--g-aws",b:"--g-aws-b",l:"AWS"},
- {x:884,y:14,w:206,h:350,f:"--g-ext",b:"--g-ext-b",l:"External AI providers"},
- {x:6,y:522,w:1084,h:94,f:"--g-dev",b:"--g-dev-b",l:"Apple, development & content tools"}
-];
-const statusVar={confirmed:"--s-confirmed",built:"--s-built",unverified:"--s-unverified",optional:"--s-optional",planned:"--s-planned"};
-const nodeEls={}, edgeEls=[];
-function nodeCost(n){const R=getRun();if(!R)return null;const m1=R[0];
-  if(typeof n.cost==="string")return Object.values(m1.c).filter(x=>x.prov===n.cost).reduce((s,x)=>s+x.val,0);
-  return n.cost.reduce((s,k)=>s+(m1.c[k]?m1.c[k].val:0),0);}
-function drawMap(){
-  map.innerHTML="";edgeEls.length=0;
-  GROUPS.forEach(g=>{mel("rect",{x:g.x,y:g.y,width:g.w,height:g.h,class:"grp",fill:cssv(g.f),stroke:cssv(g.b)});const t=mel("text",{x:g.x+10,y:g.y+16,class:"grp-label"});t.textContent=g.l;});
-  const byId=Object.fromEntries(NODES.map(n=>[n.id,n]));
-  EDGES.forEach(([a,b,k])=>{
-    const A=byId[a],B=byId[b];let x1,y1,x2,y2;
-    if(Math.abs(A.x-B.x)<5){x1=A.x+W/2;x2=B.x+W/2;y1=A.y+(B.y>A.y?H:0);y2=B.y+(B.y>A.y?0:H);}
-    else if(A.y>=520||B.y>=520){x1=A.x+W/2;y1=A.y+(B.y<A.y?0:H);x2=B.x+W/2;y2=B.y+(B.y<A.y?H:0);}
-    else {const ltr=B.x>A.x;x1=A.x+(ltr?W:0);x2=B.x+(ltr?0:W);y1=A.y+H/2;y2=B.y+H/2;}
-    const mx=(x1+x2)/2,my=(y1+y2)/2;
-    const d=(Math.abs(A.x-B.x)<5||A.y>=520||B.y>=520)?`M${x1},${y1} C${x1},${my} ${x2},${my} ${x2},${y2}`:`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;
-    const p=mel("path",{d,class:"edge"+(k?" "+k:"")});p.dataset.a=a;p.dataset.b=b;edgeEls.push(p);
-  });
-  NODES.forEach(n=>{
-    const g=mel("g",{class:"node",tabindex:"0",role:"button","aria-label":n.l+", "+STATUS[n.st].label});
-    const r=mel("rect",{x:n.x,y:n.y,width:W,height:H,class:"box",stroke:cssv(statusVar[n.st])},g);
-    if(n.st==="planned")r.setAttribute("stroke-dasharray","6 4");
-    if(n.st==="optional")r.setAttribute("stroke-dasharray","2 3");
-    mel("circle",{cx:n.x+W-11,cy:n.y+11,r:4.5,fill:cssv(statusVar[n.st])},g);
-    const t1=mel("text",{x:n.x+10,y:n.y+20},g);t1.textContent=n.l;
-    const c=nodeCost(n);
-    const t2=mel("text",{x:n.x+10,y:n.y+37,class:"small"},g);t2.textContent=n.s+(c?` · ${money(c)}/mo`:"");
-    g.addEventListener("click",()=>selectNode(n.id));
-    g.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();selectNode(n.id);}});
-    nodeEls[n.id]=g;
-  });
+let getRun=()=>null, invFilter="all", flowSel="chat";
+const open=new Set();
+const byId=Object.fromEntries(NODES.map(n=>[n.id,n]));
+function costOf(keys,r){if(!keys||!r)return 0;if(typeof keys==="string")return Object.values(r.c).filter(x=>x.prov===keys).reduce((s,x)=>s+x.val,0);return keys.reduce((s,k)=>s+(r.c[k]?r.c[k].val:0),0);}
+const pill=st=>`<span class="spill s-${st}" title="${STATUS[st].desc}"><i></i>${STATUS[st].label}</span>`;
+function chip(fc,v){
+  if(fc==="inc")return `<span class="cchip c-inc">${v<0.01?(v>0?"&lt;$0.01":"$0"):money(v)}<small>/mo</small></span>`;
+  return `<span class="cchip c-${fc}">${FC[fc].label}</span>`;
 }
-function clearHL(){Object.values(nodeEls).forEach(g=>g.classList.remove("dim","hl"));edgeEls.forEach(e=>e.classList.remove("dim","hl"));document.querySelectorAll(".fcard").forEach(c=>c.classList.remove("on"));}
-function highlight(ids){
-  clearHL();const set=new Set(ids);
-  Object.entries(nodeEls).forEach(([id,g])=>{g.classList.add(set.has(id)?"hl":"dim");});
-  edgeEls.forEach(e=>{const on=set.has(e.dataset.a)&&set.has(e.dataset.b);e.classList.add(on?"hl":"dim");});
+function scenLabel(){return (typeof currentPreset!=="undefined"&&currentPreset?PRESETS[currentPreset].t:"Custom settings")+` · ${["Low","Base","High"][BAND]} case · month 1`;}
+
+/* ---------- system map ---------- */
+function compHTML(n,r){
+  const v=costOf(n.cost,r), on=open.has(n.id);
+  const conns=[...new Set(EDGES.filter(e=>e.includes(n.id)).map(e=>e[0]===n.id?e[1]:e[0]))].map(id=>byId[id].l).join(", ");
+  const costLine=n.fc==="inc"
+    ?`<b>${money(v)} a month</b> at the current settings. <span class="small">Included in the forecast.</span>`
+    :`<b>${FC[n.fc].label}.</b> <span class="small">${FC[n.fc].desc}</span>`;
+  return `<div class="comp-wrap${on?" open":""}" data-id="${n.id}">
+   <button type="button" class="comp" aria-expanded="${on}" data-comp="${n.id}">
+    <span class="comp-main"><b>${n.l}</b><span class="comp-sub">${n.s}</span>${pill(n.st)}</span>
+    <span class="comp-side">${chip(n.fc,v)}</span><span class="chev" aria-hidden="true">›</span>
+   </button>
+   <div class="comp-detail"${on?"":" hidden"}>
+    <p>${n.d} ${n.role}</p>
+    <dl>
+     <dt>Projected cost</dt><dd>${costLine}</dd>
+     <dt>Why this amount</dt><dd>${n.a(V,r)}</dd>
+     <dt>Status</dt><dd>${pill(n.st)} ${STATUS[n.st].desc}</dd>
+     <dt>Used by</dt><dd>${n.uses.map(f=>`<span class="tag">${f}</span>`).join(" ")}</dd>
+     ${conns?`<dt>Connects to</dt><dd class="small">${conns}</dd>`:""}
+    </dl>
+   </div></div>`;
 }
-function selectNode(id){
-  const n=NODES.find(x=>x.id===id);
-  const nb=new Set([id]);EDGES.forEach(([a,b])=>{if(a===id)nb.add(b);if(b===id)nb.add(a);});
-  highlight([...nb]);nodeEls[id].classList.remove("dim");
-  const conns=[...nb].filter(x=>x!==id).map(x=>NODES.find(z=>z.id===x).l).join(", ");
-  const c=nodeCost(n);
-  const costLine=c===null?"":(typeof n.cost==="string"||n.cost.length)
-    ?`<p><b>Monthly cost in the current Simulator settings (month 1):</b> ${money(c)}</p>`
-    :`<p class="note-box"><b>Direct cost:</b> none in the monthly model.</p>`;
-  document.getElementById("detail").innerHTML=`<h3>${n.l}</h3>
-   <div class="meta"><span class="pill st-${n.st}">${STATUS[n.st].label}</span><span class="pill">${PTYPE[n.pt]}</span></div>
-   <p>${n.d}</p>${costLine}<p class="note-box"><b>Connects to:</b> ${conns||"—"}</p>
-   <p><button class="btn btn-sm" id="clr" type="button">Clear highlight</button></p>`;
-  document.getElementById("clr").onclick=()=>{clearHL();};
+function groupHTML(g,r){
+  const ns=NODES.filter(n=>n.g===g), tot=ns.filter(n=>n.fc==="inc").reduce((s,n)=>s+costOf(n.cost,r),0);
+  return `<div class="sgroup g-${g}"><div class="sg-head"><div><h3>${GROUPS[g].t}</h3><p>${GROUPS[g].d}</p></div><span class="sg-tot">${tot?money(tot)+"<small>/mo</small>":"—"}</span></div>
+   ${ns.map(n=>compHTML(n,r)).join("")}</div>`;
 }
-function mapLegend(){
-  document.getElementById("map-legend").innerHTML=Object.entries(STATUS).map(([k,v])=>`<span class="k" title="${v.desc}"><span class="sw" style="border-color:var(${statusVar[k]});${k==="planned"?"border-style:dashed;":k==="optional"?"border-style:dotted;":""}"></span>${v.label}</span>`).join("")+
-  `<span class="k"><span class="sw" style="background:var(--g-aws);border-color:var(--g-aws-b)"></span>AWS</span><span class="k"><span class="sw" style="background:var(--g-ext);border-color:var(--g-ext-b)"></span>External provider</span><span class="k"><span class="sw" style="background:var(--g-dev);border-color:var(--g-dev-b)"></span>Apple / dev tools</span><span class="k">- - - planned or dev link</span>`;
+function renderSystem(){
+  const R=getRun(), r=R&&R[0];
+  $("sys-scen").textContent=scenLabel();
+  $("sys-flow").innerHTML=groupHTML("app",r)+`<div class="sarrow" aria-hidden="true"></div>`+groupHTML("infra",r)+`<div class="sarrow" aria-hidden="true"></div>`+groupHTML("core",r)+`<div class="sarrow" aria-hidden="true"></div>`+
+    `<div class="sstack">${groupHTML("ai",r)}${groupHTML("data",r)}</div>`;
+  const tools=NODES.filter(n=>n.g==="tools");
+  $("sys-tools-body").innerHTML=`<p class="expl">${GROUPS.tools.d}. Only the Apple Developer fee is in the forecast.</p>`+tools.map(n=>compHTML(n,r)).join("");
+  $("sys-legend").innerHTML=`<div class="leg-grid"><div><b>Status</b> (what's built)<ul>${Object.entries(STATUS).map(([k,s])=>`<li>${pill(k)} ${s.desc}</li>`).join("")}</ul></div>
+   <div><b>Cost</b> (what the forecast assumes)<ul>${Object.entries(FC).map(([k,s])=>`<li>${chip(k,k==="inc"?12.5:0)} ${s.desc}</li>`).join("")}</ul></div></div>`;
 }
-function futureCards(){
-  const G=document.getElementById("futureGrid");const tl={near:"Agreed near-term",road:"Longer-term roadmap",confirm:"Needs confirmation"};
-  G.innerHTML=FUTURE.map(f=>`<button type="button" class="fcard" data-id="${f.id}"><span class="tier ${f.tier}">${tl[f.tier]}</span><h4>${f.t}</h4><p>${f.d}</p><p><b>Possible cost sources:</b> ${f.cost}</p></button>`).join("");
-  G.querySelectorAll(".fcard").forEach(c=>c.addEventListener("click",()=>{const f=FUTURE.find(x=>x.id===c.dataset.id);highlight(f.dep);c.classList.add("on");
-    document.getElementById("detail").innerHTML=`<h3>${f.t}</h3><div class="meta"><span class="pill st-planned">${tl[f.tier]}</span></div><p>${f.d}</p><p><b>Possible cost sources:</b> ${f.cost}</p><p class="note-box"><b>Depends on (highlighted):</b> ${f.dep.map(d=>NODES.find(n=>n.id===d).l).join(", ")}</p>`;
-    map.scrollIntoView({behavior:"smooth",block:"nearest"});}));
+function toggleComp(id){open.has(id)?open.delete(id):open.add(id);
+  document.querySelectorAll(`.comp-wrap[data-id="${id}"]`).forEach(w=>{const on=open.has(id);w.classList.toggle("open",on);w.querySelector(".comp").setAttribute("aria-expanded",on);w.querySelector(".comp-detail").hidden=!on;});}
+function gotoComp(id){
+  showTab("map");if(byId[id].g==="tools")$("sys-tools").open=true;
+  if(!open.has(id))toggleComp(id);
+  const w=document.querySelector(`.comp-wrap[data-id="${id}"]`);if(w){w.scrollIntoView({behavior:"smooth",block:"center"});w.classList.add("flash");setTimeout(()=>w.classList.remove("flash"),1200);}
 }
-const tyLabel={always:"Always",cond:"Conditional",async:"Async",planned:"Planned",local:"Local"};
-function flows(){
-  const L=document.getElementById("flist");
-  L.innerHTML=FLOWS.map(f=>`<button type="button" data-id="${f.id}" aria-pressed="false">${f.t}<small>${f.sub}</small></button>`).join("");
-  L.querySelectorAll("button").forEach(b=>b.addEventListener("click",()=>showFlow(b.dataset.id)));
-  document.getElementById("sharedChips").innerHTML=SHARED.map(s=>`<span class="pill">${s}</span>`).join("");
-  showFlow("chat");
+
+/* ---------- feature flows ---------- */
+function renderFlows(){
+  const R=getRun(), r=R&&R[0];
+  $("flow-pick").innerHTML=FLOWS.map(f=>`<button type="button" class="fpick${f.more?" more":""}" data-flow="${f.id}" aria-pressed="${f.id===flowSel}">${f.t}</button>`).join("");
+  const f=FLOWS.find(x=>x.id===flowSel), c=f.cost&&r?f.cost(r):null;
+  $("flow-body").innerHTML=`<div class="flow-head"><div><h3>${f.t}</h3><p>${f.sub}</p></div>
+    <div class="flow-cost${f.overlap?" overlap":""}"><span class="small">${f.overlap?"Share of other costs":"Projected cost now"}</span><b>${c===null?"—":money(c)+"<small>/mo</small>"}</b></div></div>
+   <p class="small flow-note">${f.costNote} <span class="muted">(${scenLabel()})</span></p>
+   <ol class="flow">${f.steps.map(s=>{const [k,l]=stepCost(s);return `<li class="t-${s[2]}"><div class="fs-top"><b>${s[0]}</b><span class="ctag ct-${k}">${l}</span></div><div class="fs-desc">${s[1]}</div><div class="fs-meta"><span class="svc">${s[3]}</span><span class="when">${TY[s[2]]}</span></div></li>`;}).join("")}</ol>
+   <p class="small">Shared infrastructure (servers, database, load balancer) runs whether or not a feature is used, so it isn't split into feature costs. See <a href="#breakdown">Cost Breakdown</a>.</p>`;
 }
-function showFlow(id){
-  const f=FLOWS.find(x=>x.id===id);
-  document.querySelectorAll("#flist button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.id===id));
-  const counts={};f.steps.forEach(s=>counts[s[2]]=(counts[s[2]]||0)+1);
-  document.getElementById("flowHead").innerHTML=`<h3 style="margin:0">${f.t}</h3><p class="note-box" style="margin:4px 0">${f.sub}. ${Object.entries(counts).map(([k,v])=>`${v} ${tyLabel[k].toLowerCase()}`).join(" · ")}</p>`;
-  document.getElementById("flowSteps").innerHTML=f.steps.map(s=>`<li class="t-${s[2]}"><div class="steprow"><b>${s[0]}</b><span class="ty ${s[2]}">${tyLabel[s[2]]}</span><span class="prov">${s[3]}</span></div><div class="note">${s[1]}</div></li>`).join("");
-}
-function opt(sel,label,vals){sel.innerHTML=`<option value="">${label}</option>`+vals.map(([v,t])=>`<option value="${v}">${t}</option>`).join("");}
-function inventory(){
-  const cats=[...new Set(INV.map(r=>r[0]))];
-  opt(document.getElementById("fCat"),"All categories",cats.map(c=>[c,c]));
-  opt(document.getElementById("fStatus"),"All statuses",Object.entries(STATUS).map(([k,v])=>[k,v.label]));
-  ["q","fCat","fStatus"].forEach(id=>document.getElementById(id).addEventListener("input",renderInv));
-  renderInv();
-}
+
+/* ---------- inventory ---------- */
 function renderInv(){
-  const q=document.getElementById("q").value.toLowerCase().trim();
-  const fc=document.getElementById("fCat").value,fs=document.getElementById("fStatus").value;
-  const rows=INV.filter(r=>(!fc||r[0]===fc)&&(!fs||r[4]===fs)&&(!q||r.join(" ").toLowerCase().includes(q)));
-  const by={};rows.forEach(r=>(by[r[0]]=by[r[0]]||[]).push(r));
-  document.getElementById("count").textContent=`${rows.length} of ${INV.length} items shown`;
-  document.getElementById("invList").innerHTML=Object.entries(by).map(([cat,list])=>`<h3 class="inv-cat">${cat} <span class="count">(${list.length})</span></h3>`+list.map(r=>
-    `<div class="inv-item${r[4]==="planned"?" future":""}"><h4>${r[1]}</h4><p>${r[2]}</p><div class="inv-meta"><span class="pill">${r[3]}</span><span class="pill st-${r[4]}">${STATUS[r[4]].label}</span></div></div>`).join("")).join("")||`<p class="panel">No items match.</p>`;
+  const R=getRun(), r=R&&R[0];
+  const q=($("q").value||"").toLowerCase().trim();
+  const match=x=>(invFilter==="all"||(invFilter==="planned"?x[4]==="planned":x[5]===invFilter&&!(invFilter==="excl"&&x[0]==="Future features")))&&(!q||x.slice(0,4).join(" ").toLowerCase().includes(q));
+  const counts={all:INV.length,inc:INV.filter(x=>x[5]==="inc").length,none:INV.filter(x=>x[5]==="none").length,excl:INV.filter(x=>x[5]==="excl"&&x[0]!=="Future features").length,planned:INV.filter(x=>x[4]==="planned").length};
+  $("inv-filters").innerHTML=[["all","All"],["inc","In forecast"],["none","No direct cost"],["excl","Not in forecast"],["planned","Planned"]].map(([k,l])=>`<button type="button" class="fpick" data-inv="${k}" aria-pressed="${k===invFilter}">${l} <span class="cnt">${counts[k]}</span></button>`).join("");
+  const cats=[...new Set(INV.map(x=>x[0]))], rows=INV.filter(match);
+  $("count").textContent=`${rows.length} of ${INV.length} items`;
+  $("invList").innerHTML=cats.map(cat=>{const list=rows.filter(x=>x[0]===cat);if(!list.length)return "";
+    const all=INV.filter(x=>x[0]===cat), tot=all.filter(x=>x[5]==="inc").reduce((s,x)=>s+costOf(x[6],r),0);
+    return `<details class="invcat"${q||invFilter!=="all"?" open":""}><summary><span class="ic-t">${cat}</span><span class="ic-m">${list.length} item${list.length>1?"s":""} · ${all.filter(x=>x[5]==="inc").length} in forecast</span><span class="ic-v">${tot?money(tot)+"<small>/mo</small>":"—"}</span></summary>
+     <ul>${list.map(x=>`<li><div class="ii-top"><b>${x[1]}</b>${chip(x[5],costOf(x[6],r))}</div><p>${x[2]}</p><div class="ii-meta"><span class="tag">${x[3]}</span>${pill(x[4])}</div></li>`).join("")}</ul></details>`;}).join("")||`<p class="panel">No items match.</p>`;
 }
+
+/* ---------- future features ---------- */
+function renderFuture(){
+  $("future-body").innerHTML=Object.entries(TIERS).map(([k,[t,d]])=>`<h3 class="tier-h">${t} <span class="small">· ${d}</span></h3><div class="future-grid">`+
+   FUTURE.filter(f=>f.tier===k).map(f=>`<div class="fcard"><h4>${f.t}</h4><p>${f.d}</p><p><b>Possible cost:</b> ${f.cost}</p><div class="deps"><span class="small">Depends on:</span> ${f.dep.map(d=>`<button type="button" class="tag tag-btn" data-goto="${d}">${byId[d].l}</button>`).join(" ")}</div></div>`).join("")+`</div>`).join("");
+}
+
+function showTab(v){
+  document.querySelectorAll("#map-tabs button").forEach(x=>x.setAttribute("aria-selected",x.dataset.view===v));
+  document.querySelectorAll(".mview").forEach(s=>s.classList.toggle("active",s.id==="mview-"+v));
+}
+function refresh(){renderSystem();renderFlows();renderInv();}
 function initMap(runFn){
-  getRun=runFn;map=document.getElementById("map");
-  mapLegend();drawMap();futureCards();flows();inventory();
-  document.querySelectorAll("#map-tabs button").forEach(b=>b.addEventListener("click",()=>{
-    document.querySelectorAll("#map-tabs button").forEach(x=>x.setAttribute("aria-selected",x===b));
-    document.querySelectorAll(".mview").forEach(s=>s.classList.toggle("active",s.id==="mview-"+b.dataset.view));
-  }));
+  getRun=runFn;renderFuture();
+  const page=$("page-architecture");
+  page.addEventListener("click",e=>{
+    const c=e.target.closest("[data-comp]");if(c){toggleComp(c.dataset.comp);return;}
+    const g=e.target.closest("[data-goto]");if(g){gotoComp(g.dataset.goto);return;}
+    const f=e.target.closest("[data-flow]");if(f){flowSel=f.dataset.flow;renderFlows();return;}
+    const i=e.target.closest("[data-inv]");if(i){invFilter=i.dataset.inv;renderInv();return;}
+    const t=e.target.closest("#map-tabs button");if(t)showTab(t.dataset.view);
+  });
+  $("q").addEventListener("input",renderInv);
 }
-return {initMap,drawMap};
+return {initMap,refresh,STATUS};
 })();

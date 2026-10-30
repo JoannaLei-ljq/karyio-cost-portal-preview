@@ -67,7 +67,7 @@ function route(){
 function refresh(){
   const m=modifiedParts();
   $("estbar").innerHTML="Planning estimates built from public prices and assumed usage. Not AWS bills, quotes or production measurements."+(m.any?` <span class="mod">· Prices or assumptions edited in this browser (Reset restores defaults).</span>`:"");
-  ({overview:renderOverview,simulator:render,breakdown:renderBreakdown,architecture:()=>KMap.drawMap(),assumptions:()=>{},validation:renderValidation})[PAGE]();
+  ({overview:renderOverview,simulator:render,breakdown:renderBreakdown,architecture:()=>KMap.refresh(),assumptions:()=>{},validation:renderValidation})[PAGE]();
 }
 
 /* ===================== 1. OVERVIEW ===================== */
@@ -108,7 +108,7 @@ function renderOverview(){
 /* ===================== 2. SIMULATOR ===================== */
 function buildInputs(){
   const groups={};Object.entries(IN).forEach(([k,o])=>(groups[o.g]=groups[o.g]||[]).push([k,o]));
-  $("inputs").innerHTML=Object.entries(groups).map(([g,list],gi)=>`<details class="grp" ${gi<3?"open":""}><summary>${g}</summary>`+list.map(([k,o])=>o.type==="chk"
+  $("inputs").innerHTML=Object.entries(groups).map(([g,list],gi)=>`<details class="grp" ${gi<(matchMedia("(max-width:960px)").matches?1:3)?"open":""}><summary>${g}</summary>`+list.map(([k,o])=>o.type==="chk"
     ?`<div class="ctl chk"><label><input type="checkbox" id="in-${k}" ${V[k]?"checked":""}>&nbsp;${o.l}</label>${o.hint?`<div class="hint">${o.hint}</div>`:""}</div>`
     :`<div class="ctl"><label for="in-${k}"><span>${o.l}</span><b id="o-${k}">${o.fmt(V[k])}</b></label><input type="range" id="in-${k}" min="${o.min}" max="${o.max}" step="${o.step}" value="${V[k]}">${o.hint?`<div class="hint">${o.hint}</div>`:""}</div>`).join("")+`</details>`).join("")+
     `<p class="small" style="margin:8px 0 0">Token sizes, row sizes and other uncertain values are in <a href="#assumptions">Assumptions &amp; Pricing</a>.</p>`;
@@ -240,28 +240,92 @@ function renderSens(R){
 const WHY={route:"Every chat or voice turn, except shortcuts and crisis replies",answer:"Ordinary/support turns (not RAG, not recall)",summary:"After each turn (per-turn memory summary)",sumEmb:"Embedding each chat summary",title:"First message of a new chat",recall:"Recall turns",ragGroq:"3 calls per RAG question (safety screen, analysis, HyDE)",ragFail:"Groq errors re-run on OpenAI",ragEmb:"Embedding each RAG question",ragRr:"Re-ranking 30 candidates",ragGen:"Writing each RAG answer",logEx:"Logs entered by description or AI draft",logSum:"Logs with notes",logEmb:"Memory embedding per log",insJ:"Care Insights run: judge",insI:"Care Insights run: investigator",insC:"Care Insights run: critic",dDecider:"PHI scan before the route decision",dExec:"PHI scan of the same message again when the route answers",dPair:"PHI scan of question + reply for the memory summary",dTitle:"PHI scan for chat titles",dLogSave:"PHI scan of each saved log (notes or structured fields)",dLogDraft:"PHI scans while AI drafts a log",dEvidence:"PHI scan of log notes in each Care Insights run"};
 
 /* ===================== 3. BREAKDOWN ===================== */
+// Features are groups of the model's own `feat` attribution. Shared infrastructure is never allocated to features.
 let BDM=0;
+const bdOpen=new Set();
+const users2=v=>({users:Math.min(IN.users.max,v.users*2)});
+const BDF=[
+ {id:"chatrag",t:"Chat & RAG",short:"Conversation, medical answers and memory",feats:["Chat","RAG","Memory"],color:"--c1",
+  what:"The assistant conversation: everyday chat, medical questions answered from ALS guides (RAG), and memory so Karyio remembers context. Spoken (voice) turns are included.",
+  subs:{"Chat":"Routing each message, writing replies, chat titles, privacy scans","RAG":"Medical questions: safety checks, guide search, cited answers, plus the dedicated RAG host","Memory":"Summary of each turn (with a privacy scan of question + reply) and recall"},
+  unit:r=>r.turns?[r.turns,"per chat turn"]:null,
+  drivers:[["Twice as many typed messages",v=>({chat:v.chat*2})],["Twice as many voice minutes",v=>({voiceMin:v.voiceMin*2})],["RAG share +10 points",v=>({ragPct:Math.min(100,v.ragPct+10)})],["Twice as many users",users2]],
+  overlap:"Includes the cost of spoken turns. The Voice view is a slice of this figure, not an extra cost. The route decision and memory summary of RAG turns are counted under Chat and Memory."},
+ {id:"logs",t:"Care Logs & Insights",short:"Recording care, and background insights",feats:["Care logs","Care Insights"],color:"--c3",
+  what:"Recording symptoms, medications and events, with optional AI help, plus the background Care Insights agent that looks for patterns in recent logs.",
+  subs:{"Care logs":"AI drafting, summaries of notes, memory embeddings and privacy scans","Care Insights":"Judge, investigator and critic runs; re-scans log notes"},
+  unit:r=>r.logs?[r.logs,"per care log"]:null,
+  drivers:[["Twice as many care logs",v=>({logs:v.logs*2})],["Twice as many users",users2]],
+  overlap:"No overlap: log memory and log privacy scans are counted only here, not under Chat & RAG."},
+ {id:"login",t:"Sign-in & email",short:"Accounts and verification emails",feats:["Login"],color:"--c6",
+  what:"Account sign-up, sign-in and password recovery (Cognito), plus verification and recovery emails.",
+  note:"Projected for the planned setup; login integration is in progress. Cognito is free below 10,000 monthly active users, so at pilot scale only emails cost anything: 2 per new user at $0.10 per 1,000.",
+  drivers:[["Twice as many users",users2]],overlap:"No overlap."},
+ {id:"dist",t:"App distribution",short:"Apple Developer Program",feats:["Distribution"],color:"--c5",
+  what:"Apple Developer Program membership, needed to distribute the app through TestFlight.",
+  note:"$99 a year spread monthly. Fixed: it doesn't change with usage. Turn it off with “Include Apple Developer fee” in the Simulator.",
+  drivers:[],overlap:"No overlap."}
+];
+const lineName=(k,x)=>x.cat==="De-identification"?`Privacy scan: ${DSITES[k].n}`:`${x.model}${WHY[k]?` <span class="small">· ${WHY[k]}</span>`:""}`;
+const featCost=(r,fs)=>Object.values(r.c).filter(x=>fs.includes(x.feat)).reduce((s,x)=>s+x.val,0);
+function driverRows(list,costFn,base){
+  if(!list.length)return `<p class="small">Doesn't change with usage.</p>`;
+  return `<ul class="drv">${list.map(([l,o])=>{const c=costFn(month({...V,...o(V)},A,BDM)),d=c-base;
+    return `<li><span>${l}</span><b class="${d>0.005?"up":""}">${d>=0.005?"+":d<=-0.005?"−":"±"}${money(Math.abs(d))}<small>/mo</small>${base>0.005&&Math.abs(d)>=0.005?` <span class="small">(${d>0?"+":"−"}${Math.round(100*Math.abs(d)/base)}%)</span>`:""}</b></li>`;}).join("")}</ul>`;
+}
+function featDetail(f,r,sharedNames){
+  const items=Object.entries(r.c).filter(([,x])=>f.feats.includes(x.feat)), tot=items.reduce((s,[,x])=>s+x.val,0);
+  const bySvc={};items.forEach(([,x])=>{const k=x.cat==="De-identification"?"AWS · Comprehend Medical (privacy scans)":`${x.prov} · ${x.model}`;bySvc[k]=(bySvc[k]||0)+x.val;});
+  const u=f.unit&&f.unit(r);
+  return `<p>${f.what}</p>${f.note?`<p class="note-box">${f.note}</p>`:""}
+   ${f.subs?`<h4>What's inside</h4><ul class="kv">${Object.entries(f.subs).map(([k,d])=>`<li><span><b>${k==="RAG"?"Medical RAG":k}</b><span class="small">${d}</span></span><b>${money(featCost(r,[k]))}</b></li>`).join("")}</ul>`:""}
+   <h4>Services it pays for directly</h4><ul class="kv">${Object.entries(bySvc).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<li><span>${k}</span><b>${money(v)}</b></li>`).join("")}</ul>
+   ${u?`<p class="small">≈ $${(tot/u[0]).toFixed(4)} ${u[1]} (${num(u[0])} this month).</p>`:""}
+   <h4>Shared services it relies on</h4><p class="small">${sharedNames}. These are counted once under Shared infrastructure, not here.</p>
+   <h4>Overlap with other figures</h4><p class="small">${f.overlap}</p>
+   ${f.id==="chatrag"&&V.comprehendOn?`<p class="small"><span class="badge b-pending">Pending</span> A planned privacy-processing update for RAG questions may add up to ${money(pendingTechDphi(r).cost)} a month. Not included until its implementation is verified.</p>`:""}
+   <h4>How it responds to the Simulator inputs</h4>${driverRows(f.drivers,m=>featCost(m,f.feats),tot)}
+   <details class="sub"><summary>${items.length} line item${items.length===1?"":"s"}</summary><table>${items.sort((a,b)=>b[1].val-a[1].val).map(([k,x])=>`<tr><td>${lineName(k,x)}</td><td class="n">${money(x.val)}</td></tr>`).join("")}</table></details>`;
+}
+function voiceDetail(r,vc){
+  const vs=voiceShare(r), parts={};
+  Object.values(r.c).filter(x=>x.turnBased).forEach(x=>{const k=x.cat==="De-identification"?"Privacy scans (Comprehend Medical)":x.prov+" · "+x.model;parts[k]=(parts[k]||0)+x.val*vs;});
+  return `<p>Speaking instead of typing. Speech-to-text and read-aloud run on the iPhone at no charge. Voice costs money only because each spoken message becomes a chat turn, with the same AI, privacy and memory steps.</p>
+   <p class="note-box"><b>Not added to the total.</b> This is the share of Chat &amp; RAG triggered by spoken turns (${Math.round(100*vs)}% of turns this month), calculated by the model as voice turns ÷ all turns × per-turn costs. It's already inside the Chat &amp; RAG figure.</p>
+   <h4>Where the voice share goes</h4><ul class="kv">${Object.entries(parts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<li><span>${k}</span><b>${money(v)}</b></li>`).join("")}</ul>
+   <p class="small">${num(r.voice)} voice turns this month; speech recognition and read-aloud cost $0.</p>
+   <h4>How it responds to the Simulator inputs</h4>${driverRows([["Twice as many voice minutes",v=>({voiceMin:v.voiceMin*2})],["One more turn per voice minute",v=>({tpm:Math.min(6,v.tpm+1)})],["Twice as many users",users2]],m=>voiceCost(m),vc)}
+   <p class="small">Voice isn't in a TestFlight build yet; these figures assume the planned release.</p>`;
+}
 function renderBreakdown(){
-  const R=run(V), r=R[BDM], items=Object.entries(r.c), T=r.total;
-  const sumIf=f=>items.filter(([k,x])=>f(k,x)).reduce((s,[,x])=>s+x.val,0);
+  const R=run(V), r=R[BDM], T=r.total, items=Object.entries(r.c);
   $("bd-scen").textContent=(currentPreset?PRESETS[currentPreset].t:"Custom settings")+` · ${["Low","Base","High"][BAND]} case · ${num(r.users)} users`;
-  const pd=pendingTechDphi(r), ai=r.cat["AI models"]||0, de=r.cat["De-identification"]||0;
-  const provAI={};items.filter(([,x])=>x.cat==="AI models").forEach(([,x])=>provAI[x.prov]=(provAI[x.prov]||0)+x.val);
-  const storeKeys=["rdsSt","rdsBk","cw","ecr","s3"];
-  const pc=x=>T?Math.round(100*x/T)+"% of total":"";
-  const cards=[
-   ["Voice",cssv("--c4"),voiceCost(r),`${Math.round(100*voiceShare(r))}% of turns are spoken. Speech runs on the phone at no charge, so voice cost is the AI, de-identification and memory work of those turns. It's already inside Chat, RAG and Memory below, not on top of them.`],
-   ["Chat & RAG",cssv("--c1"),sumIf((k,x)=>["Chat","RAG","Memory"].includes(x.feat)),`Chat ${money(sumIf((k,x)=>x.feat==="Chat"))}, RAG ${money(sumIf((k,x)=>x.feat==="RAG"))} (incl. its EC2 host), memory ${money(sumIf((k,x)=>x.feat==="Memory"))}. ${num(r.turns)} turns, ${num(r.rag)} of them RAG.`],
-   ["Care Logs & Insights",cssv("--c3"),sumIf((k,x)=>x.feat==="Care logs"||x.feat==="Care Insights"),`${num(r.logs)} logs and ${num(r.runs)} background Care Insights runs. Includes their AI calls and de-identification.`],
-   ["AI providers",cssv("--c2"),ai,Object.entries(provAI).sort((a,b)=>b[1]-a[1]).map(([p,v])=>`${p} ${money(v)}`).join(", ")+". "+pc(ai)],
-   ["Comprehend Medical",cssv("--c6"),de,`${num(r.dphiU)} DetectPHI units (100 characters each). ${pc(de)}. <span class="badge b-pending">Pending</span> up to +${money(pd.cost)} from a planned privacy-processing update (not included).`],
-   ["AWS infrastructure",cssv("--c1"),r.cat["Infrastructure"]||0,`Backend compute, load balancer, public IPs, database instance, RAG host, secrets. Mostly fixed: it doesn't change with use. ${pc(r.cat["Infrastructure"]||0)}`],
-   ["Database, storage & data growth",cssv("--c3"),storeKeys.reduce((s,k)=>s+(r.c[k]?r.c[k].val:0),0),`Database ≈ ${num(r.dbGb,2)} GB on ${r.alloc} GB allocated (billed by allocation), backups, logs, images, RAG bundle.`]];
-  $("bd-cards").innerHTML=cards.map(([t,c,v,d])=>`<div class="fc" style="border-top-color:${c}"><h3>${t}</h3><div class="v">${money(v)}<span class="small"> / month</span></div><p>${d}</p></div>`).join("");
-  const FC=FEATC(), byF={};items.forEach(([,x])=>byF[x.feat]=(byF[x.feat]||0)+x.val);
-  hbars("bd-feat",Object.entries(byF).map(([k,v])=>({label:FEATL[k]||k,value:v,color:FC[k]})),{l:170,pct:T});
-  const PC=PROVC(), byP={};items.forEach(([,x])=>byP[x.prov]=(byP[x.prov]||0)+x.val);
-  hbars("bd-prov",Object.entries(byP).map(([k,v])=>({label:k,value:v,color:PC[k]})),{l:120,pct:T});
+  const sharedItems=items.filter(([,x])=>x.feat==="Shared"), shared=sharedItems.reduce((s,[,x])=>s+x.val,0);
+  const known=new Set(["Shared",...BDF.flatMap(f=>f.feats)]), other=items.filter(([,x])=>!known.has(x.feat)).reduce((s,[,x])=>s+x.val,0);
+  const fv=BDF.map(f=>({f,v:featCost(r,f.feats)})), featTot=fv.reduce((s,x)=>s+x.v,0);
+  const byP={};items.forEach(([,x])=>byP[x.prov]=(byP[x.prov]||0)+x.val);const provTot=Object.values(byP).reduce((s,x)=>s+x,0);
+  const ok=x=>Math.abs(x-T)<0.005?`<span class="okc">✓ matches</span>`:`<span class="badc">✗ off by ${money(Math.abs(x-T))}</span>`;
+  const segs=fv.map(({f,v})=>[f.t,v,cssv(f.color)]).concat([["Shared infrastructure",shared,cssv("--c5")+"99"]]);
+  $("bd-total").innerHTML=`<div class="bt-top"><div><span class="small">Total, month ${BDM+1}</span><div class="bt-v">${money(T)}<small>/mo</small></div></div>
+    <p class="small bt-expl">Feature costs + shared infrastructure = total. The provider view is the same money grouped differently. Voice is a slice of Chat &amp; RAG.</p></div>
+   <div class="stackbar" role="img" aria-label="Total split into features and shared infrastructure">${segs.filter(s=>s[1]>0).map(([n,v,c])=>`<span style="flex:${v};background:${c}" title="${n}: ${money(v)}"></span>`).join("")}</div>
+   <div class="legend">${segs.map(([n,v,c])=>`<span><i style="background:${c}"></i>${n} ${money(v)}</span>`).join("")}</div>
+   <p class="small recon">Features ${money(featTot)} + shared ${money(shared)}${other?` + other ${money(other)}`:""} = ${money(featTot+shared+other)} ${ok(featTot+shared+other)} · Provider view ${money(provTot)} ${ok(provTot)}</p>`;
+  const sharedNames=sharedItems.map(([,x])=>x.model).join(", ");
+  const acc=(id,cls,dot,title,short,v,pct,body)=>`<details class="acc ${cls}" data-acc="${id}"${bdOpen.has(id)?" open":""}><summary>
+    <span class="acc-dot" style="background:${dot}"></span><span class="acc-t"><b>${title}</b><span class="small">${short}</span></span>
+    <span class="acc-v"><b>${money(v)}</b><span class="small">${pct}</span></span><span class="chev" aria-hidden="true">›</span>
+    <span class="acc-bar"><i style="width:${Math.max(0.5,Math.min(100,100*v/(T||1)))}%;background:${dot}"></i></span></summary><div class="acc-body">${body}</div></details>`;
+  const vc=voiceCost(r);
+  $("bd-features").innerHTML=fv.map(({f,v})=>acc(f.id,"",cssv(f.color),f.t,f.short,v,`${T?Math.round(100*v/T):0}% of total`,featDetail(f,r,sharedNames))).join("")+
+    acc("voice","overlap",cssv("--c4"),"Voice <span class=\"ovl\">part of Chat &amp; RAG</span>","Spoken turns. A slice, not extra",vc,`${featCost(r,["Chat","RAG","Memory"])?Math.round(100*vc/featCost(r,["Chat","RAG","Memory"])):0}% of Chat &amp; RAG`,voiceDetail(r,vc));
+  $("bd-features").querySelectorAll("details.acc").forEach(d=>d.addEventListener("toggle",()=>{d.open?bdOpen.add(d.dataset.acc):bdOpen.delete(d.dataset.acc);}));
+  $("bd-shared").innerHTML=`<div class="bt-top"><div><span class="small">Shared infrastructure</span><div class="bt-v sm">${money(shared)}<small>/mo</small></div></div><p class="small bt-expl">${T?Math.round(100*shared/T):0}% of the total. Mostly fixed: it stays about the same whether 10 or 100 people use the app, until the servers need to grow.</p></div>
+   <ul class="kv">${sharedItems.sort((a,b)=>b[1].val-a[1].val).map(([,x])=>`<li><span>${x.model} <span class="small">· ${x.cat}</span></span><b>${money(x.val)}</b></li>`).join("")}</ul>
+   <p class="small">Dedicated parts are attributed directly instead: the RAG host and its search bundle are counted in Chat &amp; RAG, because only RAG uses them.</p>`;
+  const PC=PROVC();
+  hbars("bd-prov",Object.entries(byP).map(([k,v])=>({label:k,value:v,color:PC[k]})),{l:110,pct:T,w:480});
+  $("bd-prov-note").innerHTML=`<p class="small">AWS ${money(byP.AWS||0)} includes infrastructure, storage and Comprehend Medical privacy scans. Sum ${money(provTot)} ${ok(provTot)}</p>`;
   const C=CATC();
   $("bd-table").innerHTML=`<table><tr><th>Line item</th><th>Type</th><th>Billed by</th><th>Attributed to</th><th class="n">Month ${BDM+1}</th><th class="n">Share</th></tr>`+
    items.sort((a,b)=>CATS.indexOf(a[1].cat)-CATS.indexOf(b[1].cat)||b[1].val-a[1].val).map(([k,x])=>`<tr><td>${x.model}${x.cat==="De-identification"?` <span class="small">· ${DSITES[k].n}</span>`:""}</td><td><span class="st-dot" style="background:${C[x.cat]}"></span>${x.cat}</td><td>${x.prov}</td><td>${FEATL[x.feat]||x.feat}</td><td class="n">${money(x.val)}</td><td class="n">${T?(100*x.val/T).toFixed(1):0}%</td></tr>`).join("")+
@@ -364,10 +428,10 @@ function renderValidation(){
 /* ===================== INIT ===================== */
 $("themeBtn").onclick=()=>{const r=document.documentElement;const dark=r.dataset.theme?r.dataset.theme==="dark":matchMedia("(prefers-color-scheme: dark)").matches;r.dataset.theme=dark?"light":"dark";refresh();};
 $("shareBtn").onclick=share;
+document.addEventListener("click",e=>{const b=e.target.closest("[data-to]");if(b){const t=$(b.dataset.to);if(t)t.scrollIntoView({behavior:"smooth",block:"start"});}});
 $("resetBtn").onclick=resetAll;
 document.querySelectorAll("#bdMonth button").forEach(b=>b.onclick=()=>{BDM=+b.dataset.m;document.querySelectorAll("#bdMonth button").forEach(x=>x.setAttribute("aria-pressed",x===b));renderBreakdown();});
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change",refresh);
-window.addEventListener("hashchange",route);
 buildTop();buildInputs();buildPrices();buildAssume();buildSensCtl();buildMethod();
 KMap.initMap(()=>run(V));
-route();
+KGate.onUnlock(()=>{window.addEventListener("hashchange",route);route();});
