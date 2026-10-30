@@ -1,20 +1,34 @@
-# Karyio Cost Planning — Preview v0.2
+# Karyio Cost Planning — Preview v0.3
 
 Sanitized static preview of an internal cost-planning tool. Figures are planning estimates built from public prices and assumed usage. They are not bills, quotes or production measurements.
 
 ## Structure
 
-```
-index.html         six sections, hash-routed (#overview, #simulator, #breakdown, #architecture, #assumptions, #validation)
-assets/model.js    the cost model: prices, assumptions, presets, month(), sensitivity. Every number comes from here
-assets/charts.js   inline-SVG chart helpers
-assets/map.js      Architecture Map: grouped system map, feature flows, cost inventory, future features
-assets/gate.js     team password screen
-assets/app.js      routing, shared state, scenario links, page rendering (incl. Cost Breakdown)
-assets/portal.css  styles (light/dark, mobile)
-```
+Five sections, one per planning question (hash-routed):
 
-No build step, no dependencies, no external scripts, fonts or analytics.
+| Section | Question | Hash |
+|---|---|---|
+| Overview | How much will Karyio cost, and why? | `#overview` |
+| Cost Simulator | What if usage changes? | `#simulator` |
+| Cost Explorer | Where does the money go? (breakdown + architecture map) | `#explorer`, `#explorer/map` |
+| Deployment Options | Can we deploy more cheaply? | `#deploy` |
+| Reference & Validation | Where do the numbers come from? | `#reference` |
+
+Deep links: `#explorer/map/<component>` (e.g. `comprehend`), `#explorer/feature/<id>` (`chatrag`, `logs`, `login`, `dist`, `voice`),
+`#reference/search/<query>`, `#reference/<section>` (`method`, `coverage`, `prices`, `usage`, `sources`, …), `#deploy/<option>` (`aws`, `aws2`, `hybrid`, `vps`).
+v0.2 links (`#breakdown`, `#architecture`, `#assumptions`, `#validation`) redirect to their new place.
+
+```
+index.html          the five sections
+assets/model.js     the cost model: prices, assumptions, presets, month(), sensitivity. Every number comes from here (unchanged in v0.3)
+assets/charts.js    inline-SVG chart helpers and money formatting
+assets/map.js       Architecture Map: grouped system map, feature flows, cost inventory, future features
+assets/reference.js searchable service catalog, cost-driver explanations, feature coverage, forecast provenance
+assets/deploy.js    Deployment Options: hosting alternatives, priced from provider pages (checked 2026-10-29)
+assets/gate.js      team password screen
+assets/app.js       routing, shared state, scenario links, Overview, Simulator, Cost Explorer, Reference tables
+assets/portal.css   styles (light/dark, mobile bottom navigation)
+```
 
 ## Preview locally
 
@@ -41,6 +55,7 @@ A simple team password screen. It is a courtesy screen, not security: this repos
 ## Updating
 
 Edit the files, preview locally, then commit and push to `main`. GitHub Pages redeploys in about a minute.
+Deployment Options prices live in `assets/deploy.js` with their sources and check date; re-check them before relying on the comparison.
 Keep `month()` in `model.js` identical to the internal simulator, and check parity after changes (Small pilot base month 1 = $148.98 at the 2026-10-28 defaults).
 
 ## Scenario links
