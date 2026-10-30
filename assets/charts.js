@@ -5,8 +5,11 @@ let tip;
 function showTip(e,t){tip=tip||document.getElementById("tip");tip.textContent=t;tip.style.display="block";
   const x=Math.min(e.clientX+12,window.innerWidth-270);tip.style.left=x+"px";tip.style.top=(e.clientY+12)+"px";}
 function hideTip(){(tip||document.getElementById("tip")).style.display="none";}
-function money(x){if(x===0)return "$0";if(Math.abs(x)<0.01)return "<$0.01";if(Math.abs(x)<100)return "$"+x.toFixed(2);return "$"+Math.round(x).toLocaleString();}
-function money0(x){return "$"+Math.round(x).toLocaleString();}
+// Display only: exactly zero → $0.00, positive below one cent → <$0.01, negatives keep their sign.
+function money(x){if(!x)return "$0.00";const s=x<0?"−":"",a=Math.abs(x);if(a<0.01)return s+"<$0.01";if(a<100)return s+"$"+a.toFixed(2);return s+"$"+Math.round(a).toLocaleString();}
+function money0(x){if(!x)return "$0.00";if(Math.abs(x)<1)return money(x);return (x<0?"−":"")+"$"+Math.round(Math.abs(x)).toLocaleString();}
+// Signed change, for what-if and sensitivity deltas
+function moneyD(d){if(!d)return "$0.00";return (d>0?"+":"")+money(d);}
 function num(x,d=0){return x.toLocaleString(undefined,{maximumFractionDigits:d});}
 function niceMax(v){if(v<=0)return 1;const p=Math.pow(10,Math.floor(Math.log10(v)));const f=v/p;return (f<=1?1:f<=2?2:f<=5?5:10)*p;}
 function svg(w,h){const s=document.createElementNS(NS,"svg");s.setAttribute("viewBox",`0 0 ${w} ${h}`);return s;}

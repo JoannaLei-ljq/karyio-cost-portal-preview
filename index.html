@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="referrer" content="no-referrer">
 <title>Karyio Cost Planning</title>
-<meta name="description" content="Internal planning estimates for Karyio's monthly operating cost: scenarios, simulator, breakdown, assumptions and validation status.">
+<meta name="description" content="Internal planning estimates for Karyio's monthly operating cost: what it costs and why, what-if scenarios, where the money goes, deployment options and sources.">
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="assets/portal.css">
 </head>
@@ -24,6 +24,7 @@
     <p class="small">Ask the project lead if you need the password.</p>
   </form>
 </div>
+<a class="skip" href="#main">Skip to content</a>
 <header class="top">
   <div class="top-in">
     <div class="brand"><b>Karyio Cost Planning</b><span>Internal planning preview</span></div>
@@ -34,41 +35,43 @@
     </div>
   </div>
   <nav class="main" aria-label="Sections">
-    <a href="#overview" data-page="overview">Overview</a>
-    <a href="#simulator" data-page="simulator">Cost Simulator</a>
-    <a href="#breakdown" data-page="breakdown">Cost Breakdown</a>
-    <a href="#architecture" data-page="architecture">Architecture Map</a>
-    <a href="#assumptions" data-page="assumptions">Assumptions &amp; Pricing</a>
-    <a href="#validation" data-page="validation">Validation &amp; Sources</a>
+    <a href="#overview" data-page="overview"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 13h6V4H4zm0 7h6v-5H4zm10 0h6v-9h-6zm0-16v5h6V4z"/></svg><span class="lg">Overview</span><span class="sm">Overview</span><span class="q">How much and why?</span></a>
+    <a href="#simulator" data-page="simulator"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h2v6H5zm0 10h2v6H5zM3 10h6v2H3zm8-6h2v10h-2zm0 14h2v2h-2zm-2-4h6v2H9zm8-10h2v2h-2zm0 6h2v10h-2zm-2-2h6v2h-6z"/></svg><span class="lg">Cost Simulator</span><span class="sm">Simulator</span><span class="q">What if usage changes?</span></a>
+    <a href="#explorer" data-page="explorer"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 3a7 7 0 0 1 5.6 11.2l5.1 5.1-1.4 1.4-5.1-5.1A7 7 0 1 1 10 3zm0 2a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/></svg><span class="lg">Cost Explorer</span><span class="sm">Explorer</span><span class="q">Where does the money go?</span></a>
+    <a href="#deploy" data-page="deploy"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18v6H3zm2 2v2h2V7zm-2 6h18v6H3zm2 2v2h2v-2z"/></svg><span class="lg">Deployment Options</span><span class="sm">Deploy</span><span class="q">Can we spend less?</span></a>
+    <a href="#reference" data-page="reference"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 2h9l5 5v15H6zm8 1.5V8h4.5zM9 12v2h8v-2zm0 4v2h8v-2z"/></svg><span class="lg">Reference &amp; Validation</span><span class="sm">Reference</span><span class="q">Where do the numbers come from?</span></a>
   </nav>
 </header>
 <div class="estbar"><div id="estbar">Planning estimates built from public prices and assumed usage. Not AWS bills, quotes or production measurements.</div></div>
+<main id="main">
 
 <!-- ===================== 1. OVERVIEW ===================== -->
 <section class="page" id="page-overview">
-  <h1>What will Karyio cost to run?</h1>
-  <p class="lede">Karyio's estimated monthly operating cost for the November 2026 demo and the pilots after it. Every figure comes from one bottom-up model: verified unit prices × assumed usage. No billing history was used. Usage numbers are judgment values until the pilot produces real data.</p>
-  <div class="kpis" id="ov-kpis"></div>
-  <div class="grid2">
-    <div class="panel"><h2>12-month trend by scenario</h2>
-      <p class="expl">Base case for each preset. The shaded band shows the Growing pilot's Low–High range. Small pilot has no growth, so it stays flat.</p>
-      <div class="legend" id="ov-lg-trend"></div><div class="chart" id="ov-trend"></div></div>
-    <div class="panel"><h2>Where the money goes</h2>
-      <p class="expl">Small pilot, month 1 and Growing pilot, month 12, by cost type. Fixed infrastructure dominates early; de-identification and AI grow with use.</p>
-      <div class="legend" id="ov-lg-mix"></div><div class="chart" id="ov-mix"></div></div>
+  <h1>How much will Karyio cost, and why?</h1>
+  <p class="method-stmt"><b>Forecasts are based on modeled usage for a planned operating environment, not historical development spending or production measurements.</b> <a href="#reference/method">How the forecast is built →</a></p>
+  <div class="ov-hero" id="ov-hero"></div>
+  <div class="grid2 ov-main">
+    <div class="panel"><div class="ph"><h2>Largest cost drivers</h2><div class="seg seg-sm" id="ovMonth"><button type="button" data-m="0" aria-pressed="true">Month 1</button><button type="button" data-m="11" aria-pressed="false">Month 12</button></div></div>
+      <p class="expl">Tap a driver to see what it is, why Karyio needs it, why it grows, and what could lower it.</p>
+      <div id="ov-drivers"></div></div>
+    <div>
+      <div class="panel"><h2>Fixed vs usage-based</h2>
+        <p class="expl">Fixed costs run whether or not anyone uses the app. Usage-based costs follow messages, voice and care logs.</p>
+        <div id="ov-split"></div></div>
+      <div class="panel"><h2>12-month trend by scenario</h2>
+        <p class="expl">Base case for each preset. The shaded band is the Growing pilot's Low–High range.</p>
+        <div class="legend" id="ov-lg-trend"></div><div class="chart" id="ov-trend"></div></div>
+    </div>
   </div>
   <div class="grid2">
-    <div class="panel"><h2>Largest cost drivers</h2>
-      <p class="expl">Top line items in the Growing pilot, month 12 (base case).</p>
-      <div class="chart" id="ov-drivers"></div></div>
-    <div class="panel"><h2>What's uncertain</h2>
-      <p class="expl">Prices are mostly verified. The forecast will mostly miss on <b>usage</b>, not prices.</p>
-      <div id="ov-uncertain"></div>
-      <p class="small" style="margin-top:8px"><a href="#validation">See Validation &amp; Sources →</a></p></div>
+    <div class="panel"><h2>Main cost risks</h2><p class="expl">Where the forecast could be wrong, largest first. Prices are mostly verified; usage is not.</p><div id="ov-risks"></div></div>
+    <div class="panel"><h2>Optimization opportunities</h2><p class="expl">Backed by the code audit or official prices. Privacy protections stay on in every option.</p><div id="ov-opps"></div></div>
   </div>
-  <div class="panel cta">
-    <div><h2>Try your own numbers</h2><p class="expl" style="margin:0">Change users, growth, voice minutes, chat, care logs, RAG share and infrastructure, and every chart updates.</p></div>
-    <a class="btn primary" href="#simulator">Open the Cost Simulator →</a>
+  <div class="qcards">
+    <a class="qcard" href="#simulator"><b>What if usage changes?</b><span>Type or slide users, chat, voice, logs and infrastructure.</span></a>
+    <a class="qcard" href="#explorer"><b>Where does the money go?</b><span>Every feature, shared service and line item.</span></a>
+    <a class="qcard" href="#deploy"><b>Can we spend less?</b><span>AWS, hybrid and VPS hosting compared.</span></a>
+    <a class="qcard" href="#reference"><b>Where do the numbers come from?</b><span>Search prices, sources and assumptions.</span></a>
   </div>
   <p class="small" id="ov-note"></p>
 </section>
@@ -76,7 +79,7 @@
 <!-- ===================== 2. SIMULATOR ===================== -->
 <section class="page" id="page-simulator">
   <h1>Cost Simulator</h1>
-  <p class="lede">Change how people use Karyio and see monthly cost move. Use the sliders on the left. Token sizes, text lengths and prices are on <a href="#assumptions">Assumptions &amp; Pricing</a>.</p>
+  <p class="lede">What if usage changes? Type a number or use the slider. Every page follows these settings. Token sizes, text lengths and prices are in <a href="#reference/prices">Reference &amp; Validation</a>.</p>
   <div class="bar sim-head">
     <span class="small">Scenario:</span>
     <div class="seg" id="presetSeg"></div>
@@ -158,84 +161,122 @@
   </div>
 </section>
 
-<!-- ===================== 3. BREAKDOWN ===================== -->
-<section class="page" id="page-breakdown">
-  <h1>Cost Breakdown</h1>
-  <p class="lede">One monthly total, seen from different angles. Start with the features, and tap one to see what drives its cost.</p>
+<!-- ===================== 3. COST EXPLORER ===================== -->
+<section class="page" id="page-explorer">
+  <h1>Cost Explorer</h1>
+  <p class="lede">Where does the money go? Start with the features, or switch to the architecture map to follow a request through the system.</p>
   <div class="ctxbar">
     <span class="small">Showing</span><b id="bd-scen"></b>
     <div class="seg" id="bdMonth"><button type="button" data-m="0" aria-pressed="true">Month 1</button><button type="button" data-m="11" aria-pressed="false">Month 12</button></div>
     <a class="btn btn-sm" href="#simulator">Change in Simulator</a>
   </div>
-  <div class="panel bd-total" id="bd-total"></div>
-  <div class="bd-sec"><h2><span class="num">1</span>Cost by feature</h2>
-    <p class="expl">What each part of the product costs to use: AI calls, privacy scans and storage that happen <em>because</em> someone used it. Tap a feature for details.</p>
-    <div id="bd-features"></div></div>
-  <div class="bd-sec"><h2><span class="num">2</span>Shared infrastructure</h2>
-    <p class="expl">Servers, database and networking that run around the clock whatever people do. Every feature depends on them, so they are <b>not split</b> between features. There's no agreed allocation method, and inventing one would distort the feature numbers.</p>
-    <div class="panel" id="bd-shared"></div></div>
-  <div class="bd-sec"><h2><span class="num">3</span>Cost by service / provider</h2>
-    <p class="expl">The same total again, grouped by who sends the invoice. This is a different view of the same money, so don't add it to the feature view.</p>
-    <div class="panel"><div class="chart" id="bd-prov"></div><div id="bd-prov-note"></div></div></div>
-  <details class="panel bd-sec bd-lines"><summary><h2><span class="num">4</span>Detailed line items</h2><span class="small">Every line in the model, for auditing</span></summary>
-    <div class="tbl-wrap" id="bd-table"></div></details>
+  <div class="subnav" role="tablist" aria-label="Cost Explorer views">
+    <a role="tab" href="#explorer" data-sub="breakdown">Cost breakdown</a>
+    <a role="tab" href="#explorer/map" data-sub="map">Architecture map</a>
+  </div>
+
+  <div class="exview" id="ex-breakdown">
+    <div class="panel bd-total" id="bd-total"></div>
+    <div class="bd-sec"><h2><span class="num">1</span>Cost by feature</h2>
+      <p class="expl">What each part of the product costs to use: AI calls, privacy scans and storage that happen <em>because</em> someone used it. Tap a feature for its costs, coverage and drivers.</p>
+      <div id="bd-features"></div></div>
+    <div class="bd-sec"><h2><span class="num">2</span>Shared infrastructure</h2>
+      <p class="expl">Servers, database and networking that run around the clock whatever people do. Every feature depends on them, so they are <b>not split</b> between features. There's no agreed allocation method, and inventing one would distort the feature numbers.</p>
+      <div class="panel" id="bd-shared"></div></div>
+    <div class="bd-sec"><h2><span class="num">3</span>Cost by service / provider</h2>
+      <p class="expl">The same total again, grouped by who sends the invoice. This is a different view of the same money, so don't add it to the feature view.</p>
+      <div class="panel"><div class="chart" id="bd-prov"></div><div id="bd-prov-note"></div></div></div>
+    <details class="panel bd-sec bd-lines"><summary><h2><span class="num">4</span>Detailed line items</h2><span class="small">Every line in the model, for auditing</span></summary>
+      <div class="tbl-wrap" id="bd-table"></div></details>
+  </div>
+
+  <div class="exview" id="explorer-map">
+    <div class="infobox"><b>Costs reflect the planned operating setup, not just what is currently deployed.</b> Implementation status is shown separately. A small cost means the service is cheap at the projected usage, not that it hasn't been built.</div>
+    <nav class="tabs" id="map-tabs" role="tablist">
+      <button role="tab" type="button" aria-selected="true" data-view="map">System map</button>
+      <button role="tab" type="button" aria-selected="false" data-view="flows">Feature flows</button>
+      <button role="tab" type="button" aria-selected="false" data-view="inv">Cost inventory</button>
+    </nav>
+    <section class="mview active" id="mview-map">
+      <p class="expl">A request travels left to right (top to bottom on a phone): from the app, through the cloud entry point, to the backend, which uses AI, privacy and storage services. Tap any component for details. <span class="muted" id="sys-scen"></span></p>
+      <div class="sysflow" id="sys-flow"></div>
+      <details class="panel sys-more" id="sys-tools"><summary><b>Supporting tools</b><span class="small">Distribution, testing and monitoring</span></summary><div id="sys-tools-body"></div></details>
+      <details class="panel sys-more"><summary><b>What do the labels mean?</b><span class="small">Status vs cost</span></summary><div id="sys-legend"></div></details>
+    </section>
+    <section class="mview" id="mview-flows">
+      <p class="expl">Pick a feature to see the steps it goes through, which services are involved, and where cost occurs.</p>
+      <div class="fpicks" id="flow-pick"></div>
+      <div class="panel" id="flow-body"></div>
+    </section>
+    <section class="mview" id="mview-inv">
+      <p class="expl">Everything that could generate a cost, grouped by category. Each item shows whether it is in the forecast, has no direct cost, or is left out.</p>
+      <div class="fpicks" id="inv-filters"></div>
+      <div class="controls"><input type="search" id="q" placeholder="Filter: e.g. Voyage, backup, email…" aria-label="Filter inventory"><span class="count" id="count"></span></div>
+      <div id="invList"></div>
+    </section>
+    <details class="panel future-sec"><summary><h2>Future features &amp; potential costs</h2><span class="small">11 items · not built yet · not in the forecast</span></summary>
+      <p class="expl">Capabilities the team may build, and the costs they could add. None of these are counted in the monthly totals unless noted. Tap a dependency to find it on the system map.</p>
+      <div id="future-body"></div></details>
+  </div>
 </section>
 
-<!-- ===================== 4. ARCHITECTURE ===================== -->
-<section class="page" id="page-architecture">
-  <h1>Architecture Map</h1>
-  <p class="lede">How Karyio works and where its running costs come from. Start with the system map, or pick a feature to follow its path.</p>
-  <div class="infobox"><b>Costs reflect the planned operating setup, not just what is currently deployed.</b> Implementation status is shown separately. A small cost means the service is cheap at the projected usage, not that it hasn't been built.</div>
-  <nav class="tabs" id="map-tabs" role="tablist">
-    <button role="tab" type="button" aria-selected="true" data-view="map">System map</button>
-    <button role="tab" type="button" aria-selected="false" data-view="flows">Feature flows</button>
-    <button role="tab" type="button" aria-selected="false" data-view="inv">Cost inventory</button>
-  </nav>
-  <section class="mview active" id="mview-map">
-    <p class="expl">A request travels left to right (top to bottom on a phone): from the app, through the cloud entry point, to the backend, which uses AI, privacy and storage services. Tap any component for details. <span class="muted" id="sys-scen"></span></p>
-    <div class="sysflow" id="sys-flow"></div>
-    <details class="panel sys-more" id="sys-tools"><summary><b>Supporting tools</b><span class="small">Distribution, testing and monitoring</span></summary><div id="sys-tools-body"></div></details>
-    <details class="panel sys-more"><summary><b>What do the labels mean?</b><span class="small">Status vs cost</span></summary><div id="sys-legend"></div></details>
-  </section>
-  <section class="mview" id="mview-flows">
-    <p class="expl">Pick a feature to see the steps it goes through, which services are involved, and where cost occurs.</p>
-    <div class="fpicks" id="flow-pick"></div>
-    <div class="panel" id="flow-body"></div>
-  </section>
-  <section class="mview" id="mview-inv">
-    <p class="expl">Everything that could generate a cost, grouped by category. Each item shows whether it is in the forecast, has no direct cost, or is left out.</p>
-    <div class="fpicks" id="inv-filters"></div>
-    <div class="controls"><input type="search" id="q" placeholder="Search: e.g. Voyage, backup, email…" aria-label="Search inventory"><span class="count" id="count"></span></div>
-    <div id="invList"></div>
-  </section>
-  <details class="panel future-sec"><summary><h2>Future features &amp; potential costs</h2><span class="small">11 items · not built yet · not in the forecast</span></summary>
-    <p class="expl">Capabilities the team may build, and the costs they could add. None of these are counted in the monthly totals unless noted. Tap a dependency to find it on the system map.</p>
-    <div id="future-body"></div></details>
+<!-- ===================== 4. DEPLOYMENT OPTIONS ===================== -->
+<section class="page" id="page-deploy">
+  <h1>Can we deploy Karyio for less?</h1>
+  <p class="lede">Three ways to host Karyio for an external TestFlight pilot, compared on full monthly cost and on what each one asks of a small team. AI providers, Comprehend Medical, Cognito and the Apple fee stay the same in every option, so they're included in every total.</p>
+  <div class="ctxbar">
+    <span class="small">Scenario</span><b id="dp-scen"></b>
+    <div class="seg" id="dpMonth"><button type="button" data-m="0" aria-pressed="true">Month 1</button><button type="button" data-m="11" aria-pressed="false">Month 12</button></div>
+    <a class="btn btn-sm" href="#simulator">Change in Simulator</a>
+  </div>
+  <div class="infobox" id="dp-key"></div>
+  <div class="dp-cards" id="dp-cards"></div>
+  <div class="panel"><h2>Hosting vs usage, by option</h2>
+    <p class="expl">The bars stack the same usage-based costs onto each option's hosting cost. Ranges reflect plan choices and unresolved requirements, not forecast precision.</p>
+    <div class="legend" id="dp-lg"></div><div class="chart" id="dp-chart"></div></div>
+  <div class="panel"><h2>Side-by-side comparison</h2>
+    <p class="expl">Qualitative ratings come from the providers' published documentation and the current deployment scripts, not from engineering-hour estimates.</p>
+    <div class="tbl-wrap" id="dp-matrix"></div></div>
+  <div class="panel" id="dp-rec"></div>
+  <div class="grid2">
+    <div class="panel"><h2>Privacy &amp; agreements</h2><div id="dp-compliance"></div></div>
+    <div class="panel"><h2>Cross-provider requirements</h2><div id="dp-cross"></div></div>
+  </div>
+  <details class="panel"><summary><b>Other providers checked</b> <span class="small">and why they aren't shown above</span></summary><div id="dp-other"></div></details>
+  <div class="panel"><h2>Deployment pricing sources</h2><div class="tbl-wrap" id="dp-sources"></div></div>
 </section>
 
-<!-- ===================== 5. ASSUMPTIONS ===================== -->
-<section class="page" id="page-assumptions">
-  <h1>Assumptions &amp; Pricing</h1>
-  <p class="lede">Every price and usage assumption the model uses, where it came from and how sure we are. Edits here feed the Simulator and every other page directly; there is no second copy of the numbers. Use <b>Reset</b> at the top to restore the defaults.</p>
-  <div class="jump"><button type="button" class="fpick" data-to="j-method">How it's calculated</button><button type="button" class="fpick" data-to="j-prices">Prices</button><button type="button" class="fpick" data-to="j-usage">Usage assumptions</button><button type="button" class="fpick" data-to="j-onetime">One-time costs</button></div>
-  <div class="bar" style="margin-bottom:12px"><span class="small">Active column for uncertain assumptions:</span><div class="seg bandSeg" data-band-seg></div></div>
+<!-- ===================== 5. REFERENCE & VALIDATION ===================== -->
+<section class="page" id="page-reference">
+  <h1>Reference &amp; Validation</h1>
+  <p class="lede">Where the numbers come from: prices, sources, assumptions, what's been verified and what hasn't. Edits here feed every page; use <b>Reset</b> to restore the defaults.</p>
+  <div class="panel search-panel" id="r-search">
+    <label for="rs-q"><h2>Search prices &amp; sources</h2></label>
+    <div class="search-row"><input type="search" id="rs-q" placeholder="Service or feature: login, voice, RAG, database, privacy…" autocomplete="off" enterkeyhint="search"></div>
+    <div class="fpicks" id="rs-chips"></div>
+    <div id="rs-results" aria-live="polite"></div>
+  </div>
+  <div class="jump"><button type="button" class="fpick" data-to="r-method">Forecast basis</button><button type="button" class="fpick" data-to="r-coverage">Feature coverage</button><button type="button" class="fpick" data-to="j-method">How it's calculated</button><button type="button" class="fpick" data-to="j-prices">Prices</button><button type="button" class="fpick" data-to="j-usage">Usage assumptions</button><button type="button" class="fpick" data-to="j-onetime">One-time costs</button><button type="button" class="fpick" data-to="r-valid">Verified vs pending</button><button type="button" class="fpick" data-to="j-unc">Uncertainty</button><button type="button" class="fpick" data-to="j-work">Remaining work</button><button type="button" class="fpick" data-to="j-cal">Calibration plan</button><button type="button" class="fpick" data-to="j-src">Sources</button><button type="button" class="fpick" data-to="j-log">Change log</button></div>
+
+  <div class="panel" id="r-method"><h2>Forecast basis &amp; data provenance</h2><div id="r-method-body"></div></div>
+  <div class="panel" id="r-coverage"><h2>Feature cost coverage</h2>
+    <p class="expl">What each feature's forecast includes, what it leaves out, and what still needs checking. Compiled from a read-only review of the app, backend and RAG code on 2026-10-29.</p>
+    <div class="tbl-wrap" id="r-coverage-body"></div></div>
+
+  <div class="bar" style="margin:4px 0 12px"><span class="small">Active column for uncertain assumptions:</span><div class="seg bandSeg" data-band-seg></div></div>
   <div class="panel" id="j-method"><h2>How the cost is calculated</h2>
     <p class="expl">Monthly cost = Σ (unit price × usage volume). Users × daily-active share × activity per user × 30.4 days gives the month's chat turns, voice turns and care logs. Every usage cost scales from those volumes. Fixed infrastructure is priced for 730 hours a month.</p>
     <div class="tbl-wrap" id="as-method"></div></div>
   <div class="panel" id="j-prices"><h2>Prices (verified 2026-10-28 unless noted)</h2>
-    <p class="expl">Edit any price; every chart updates. <span class="badge b-official">Official</span> read on the provider's own pricing page or price list. <span class="badge b-secondary">Secondary</span> the official page didn't show it, so a third-party source was used. <span class="badge b-repo">Team-recorded</span> recorded by the team from AWS on 2026-09-15, not re-checked. <span class="badge b-assumed">Assumed</span> no source found.</p>
+    <p class="expl">Edit any price; every chart updates. <span class="badge b-official">Official price</span> read on the provider's own pricing page or price list. <span class="badge b-secondary">Secondary price</span> the official page didn't show it, so a third-party source was used. <span class="badge b-repo">Team-recorded price</span> recorded by the team from AWS on 2026-09-15, not re-checked. <span class="badge b-assumed">Assumed</span> no source found.</p>
     <div class="tbl-wrap" id="tb-prices"></div></div>
   <div class="panel" id="j-usage"><h2>Usage assumptions (low / base / high)</h2>
-    <p class="expl">The highlighted column is active. <span class="badge b-measured">Measured</span> from team eval runs or content data. <span class="badge b-synthetic">Synthetic eval</span> measured on synthetic evaluation questions, not real patient traffic. <span class="badge b-code">From code</span> set in configuration. <span class="badge b-assumed">Assumed</span> a judgment value; replace when measured.</p>
+    <p class="expl">The highlighted column is active. <span class="badge b-measured">Dev-measured</span> observed in development or evaluation runs, not production. <span class="badge b-synthetic">Synthetic eval</span> measured on synthetic test questions, not real patient traffic. <span class="badge b-code">Code-derived</span> set in code or configuration. <span class="badge b-assumed">Assumed</span> a judgment value; replace when measured.</p>
     <div class="tbl-wrap" id="tb-assume"></div></div>
   <div class="panel" id="j-onetime"><h2>One-time &amp; optional costs (not in the monthly totals)</h2><div class="tbl-wrap" id="tb-onetime"></div></div>
-</section>
 
-<!-- ===================== 6. VALIDATION ===================== -->
-<section class="page" id="page-validation">
-  <h1>Validation &amp; Sources</h1>
-  <p class="lede">How much of the model is verified, what has been measured, and what still needs checking before and during the pilot. Unit prices are mostly verified; usage volumes and text lengths mostly aren't. The gap between forecast and actual cost will come mainly from how people use Karyio.</p>
-  <div class="jump"><button type="button" class="fpick" data-to="j-done">Verified vs pending</button><button type="button" class="fpick" data-to="j-unc">Uncertainty</button><button type="button" class="fpick" data-to="j-work">Remaining work</button><button type="button" class="fpick" data-to="j-cal">Calibration plan</button><button type="button" class="fpick" data-to="j-src">Sources</button><button type="button" class="fpick" data-to="j-log">Change log</button></div>
+  <h2 class="sec-h" id="r-valid">Validation</h2>
+  <p class="expl">How much of the model is verified, what has been measured, and what still needs checking before and during the pilot. The gap between forecast and actual cost will come mainly from how people use Karyio.</p>
   <div class="ev" id="va-ev"></div>
   <div class="grid2">
     <div class="panel" id="j-done"><h2>Verified and measured</h2><div id="va-done"></div></div>
@@ -248,7 +289,7 @@
     <p class="expl">The short list that closes the biggest gaps. None of it needs a deployment or a paid call to plan.</p>
     <div class="tbl-wrap" id="va-tasks"></div></div>
   <div class="panel" id="j-cal"><h2>Pilot calibration plan</h2>
-    <p class="expl">Calibrate on usage quantities, not dollars: replace each assumption with its observed value and let the model recompute cost from verified prices. That keeps "we misjudged usage" apart from "we misjudged prices."</p>
+    <p class="expl">Calibrate on usage quantities, not dollars: replace each assumption with its observed value and let the model recompute cost from verified prices. That keeps "we misjudged usage" apart from "we misjudged prices." No estimated-vs-actual comparison is shown until reliable pilot billing data exists.</p>
     <ol class="tight">
       <li><b>Freeze the forecast</b> before the pilot starts: save the base inputs and per-driver forecasts with the date and cohort size.</li>
       <li><b>Week 1 smoke check:</b> confirm every collection path returns numbers, and that no text or identifiers leave the environment.</li>
@@ -260,18 +301,22 @@
   <div class="panel" id="j-src"><h2>Pricing sources</h2><div class="tbl-wrap" id="va-sources"></div></div>
   <div class="panel" id="j-log"><h2>Change log</h2>
     <ul class="tight">
+      <li><b>2026-10-29</b> v0.3: reorganized around five planning questions; added Deployment Options, searchable sources, forecast provenance and feature coverage. Cost model and formulas unchanged.</li>
       <li><b>2026-10-29</b> Portal created from the Cost Map and Cost Simulator. Same model and formulas; public-preview text generalized.</li>
       <li><b>2026-10-28</b> RAG answer output tokens set to 250 / 340 / 500 and RAG question-plus-reply scan length to 1,100 / 1,550 / 2,200 characters, from synthetic evaluation (mean answer ≈ 1,365 chars, p90 ≈ 2,000). Small pilot base fell from about $153 to about $149 a month.</li>
       <li><b>2026-10-28</b> DetectPHI pricing checked against AWS's price list (published 2026-09-11), including volume tiers. De-identification steps audited in code.</li>
     </ul></div>
 </section>
+</main>
 
-<footer>Karyio Cost Planning · internal planning tool, not part of the Karyio app · estimates only · model dated 2026-10-28</footer>
+<footer>Karyio Cost Planning · internal planning tool, not part of the Karyio app · estimates only · model dated 2026-10-28 · v0.3</footer>
 <div class="tip" id="tip"></div>
 <div class="toast" id="toast" role="status"></div>
 <script src="assets/model.js"></script>
 <script src="assets/charts.js"></script>
 <script src="assets/map.js"></script>
+<script src="assets/reference.js"></script>
+<script src="assets/deploy.js"></script>
 <script src="assets/gate.js"></script>
 <script src="assets/app.js"></script>
 </body>

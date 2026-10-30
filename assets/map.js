@@ -83,7 +83,7 @@ const NODES = [
   a:()=>"Not in the forecast; expected to stay within free allowances."},
  {id:"eval",g:"tools",l:"Evaluation runs",s:"AI quality tests",st:"optional",fc:"excl",
   d:"Agent and RAG quality test suites.",role:"Checks answer quality and safety before releases.",uses:["Quality testing"],
-  a:()=>"Not in the monthly forecast. Each run makes real AI calls; the per-run cost is listed under Assumptions & Pricing → One-time costs."},
+  a:()=>"Not in the monthly forecast. Each run makes real AI calls; the per-run cost is listed under Reference & Validation → One-time costs."},
  {id:"unstructured",g:"tools",l:"Unstructured",s:"PDF parsing for guide updates",st:"optional",fc:"excl",
   d:"Hosted PDF parsing.",role:"Used only when the ALS guide collection is rebuilt.",uses:["Content updates"],
   a:()=>"Not in the forecast; occasional, per rebuild."},
@@ -280,7 +280,7 @@ function renderFlows(){
     <div class="flow-cost${f.overlap?" overlap":""}"><span class="small">${f.overlap?"Share of other costs":"Projected cost now"}</span><b>${c===null?"—":money(c)+"<small>/mo</small>"}</b></div></div>
    <p class="small flow-note">${f.costNote} <span class="muted">(${scenLabel()})</span></p>
    <ol class="flow">${f.steps.map(s=>{const [k,l]=stepCost(s);return `<li class="t-${s[2]}"><div class="fs-top"><b>${s[0]}</b><span class="ctag ct-${k}">${l}</span></div><div class="fs-desc">${s[1]}</div><div class="fs-meta"><span class="svc">${s[3]}</span><span class="when">${TY[s[2]]}</span></div></li>`;}).join("")}</ol>
-   <p class="small">Shared infrastructure (servers, database, load balancer) runs whether or not a feature is used, so it isn't split into feature costs. See <a href="#breakdown">Cost Breakdown</a>.</p>`;
+   <p class="small">Shared infrastructure (servers, database, load balancer) runs whether or not a feature is used, so it isn't split into feature costs. See the <a href="#explorer">cost breakdown</a>.</p>`;
 }
 
 /* ---------- inventory ---------- */
@@ -311,7 +311,7 @@ function showTab(v){
 function refresh(){renderSystem();renderFlows();renderInv();}
 function initMap(runFn){
   getRun=runFn;renderFuture();
-  const page=$("page-architecture");
+  const page=$("explorer-map");
   page.addEventListener("click",e=>{
     const c=e.target.closest("[data-comp]");if(c){toggleComp(c.dataset.comp);return;}
     const g=e.target.closest("[data-goto]");if(g){gotoComp(g.dataset.goto);return;}
@@ -321,5 +321,5 @@ function initMap(runFn){
   });
   $("q").addEventListener("input",renderInv);
 }
-return {initMap,refresh,STATUS};
+return {initMap,refresh,STATUS,gotoComp,showTab,byId};
 })();

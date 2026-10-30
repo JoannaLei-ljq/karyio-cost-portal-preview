@@ -1,4 +1,5 @@
-/* Karyio Cost Planning portal: routing, shared state and the six pages.
+/* Karyio Cost Planning portal: routing, shared state, Overview, Simulator and Cost Explorer.
+   Deployment Options live in deploy.js, the reference catalog and coverage in reference.js.
    Every number comes from model.js; no page keeps its own copy of a formula. */
 
 const CATS=["Infrastructure","AI models","De-identification","Storage & logs","Other services"];
@@ -8,7 +9,7 @@ const FEATC=()=>({"Chat":cssv("--c1"),"RAG":cssv("--c2"),"Memory":cssv("--c4"),"
 const FEATL={"Shared":"Shared infrastructure","Login":"Login & email","Distribution":"App distribution"};
 const MON=Array.from({length:12},(_,i)=>"M"+(i+1));
 const $=id=>document.getElementById(id);
-const badge=s=>`<span class="badge b-${s}">${{official:"Official",secondary:"Secondary",repo:"Team-recorded",assumed:"Assumed",measured:"Measured",synthetic:"Synthetic eval",code:"From code",pending:"Pending",missing:"Missing"}[s]}</span>`;
+const badge=s=>`<span class="badge b-${s}">${{official:"Official price",secondary:"Secondary price",repo:"Team-recorded",assumed:"Assumed",measured:"Dev-measured",synthetic:"Synthetic eval",code:"Code-derived",pending:"Not yet verified",missing:"Missing"}[s]}</span>`;
 const aBase=()=>Object.fromEntries(AS.map(r=>[r[0],r[4]]));
 const runWith=(v,a)=>{const out=[];for(let m=0;m<12;m++)out.push(month(v,a,m));return out;};
 const sum12=R=>R.reduce((s,r)=>s+r.total,0);
@@ -48,73 +49,152 @@ function resetAll(){
 }
 function toast(t){const e=$("toast");e.textContent=t;e.style.display="block";clearTimeout(toast.h);toast.h=setTimeout(()=>e.style.display="none",2200);}
 async function share(){
-  const url=location.origin+location.pathname+"#"+PAGE+"?cfg="+encodeState();
+  const url=location.origin+location.pathname+"#"+(lastPath||PAGE)+"?cfg="+encodeState();
   try{await navigator.clipboard.writeText(url);toast("Scenario link copied. It restores these settings.");}
   catch(e){window.prompt("Copy this link to share the current scenario:",url);}
 }
 
-/* ===================== ROUTING ===================== */
-const PAGES=["overview","simulator","breakdown","architecture","assumptions","validation"];
+/* ===================== ROUTING =====================
+   #page[/sub[/arg]][?cfg=…]  e.g. #explorer/map/comprehend, #explorer/feature/voice, #reference/search/login.
+   v0.2 page names still work and redirect to their new home. */
+const PAGES=["overview","simulator","explorer","deploy","reference"];
+const ALIAS={breakdown:"explorer",architecture:"explorer/map",assumptions:"reference/method-calc",validation:"reference/valid"};
+const REF_ANCHOR={method:"r-method",coverage:"r-coverage","method-calc":"j-method",prices:"j-prices",usage:"j-usage",onetime:"j-onetime",valid:"r-valid",uncertainty:"j-unc",work:"j-work",calibration:"j-cal",sources:"j-src",log:"j-log",search:"r-search"};
+let SUB="", ARG="", lastPath="";
 function route(){
-  const [pg,q]=location.hash.slice(1).split("?");
-  if(q&&q.startsWith("cfg=")){if(applyState(q.slice(4))){syncInputs();markPreset(currentPreset);syncBand();buildPrices();buildAssume();buildSensCtl();toast("Scenario restored from link");}
-    history.replaceState(null,"","#"+(PAGES.includes(pg)?pg:"overview"));}
-  PAGE=PAGES.includes(pg)?pg:"overview";
+  let [path,q]=location.hash.slice(1).split("?");
+  const first=(path||"").split("/")[0];
+  if(ALIAS[first])path=ALIAS[first]+path.slice(first.length);
+  if(q&&q.startsWith("cfg=")){if(applyState(q.slice(4))){syncInputs();markPreset(currentPreset);syncBand();buildPrices();buildAssume();buildSensCtl();toast("Scenario restored from link");}}
+  const parts=(path||"").split("/");
+  PAGE=PAGES.includes(parts[0])?parts[0]:"overview";SUB=parts[1]||"";ARG=decodeURIComponent(parts.slice(2).join("/")||"");
+  const canon="#"+[PAGE,SUB,parts.slice(2).join("/")].filter(Boolean).join("/");
+  if(q||location.hash!==canon)history.replaceState(null,"",canon);
+  const pageChanged=PAGE!==lastPath.split("/")[0];lastPath=canon.slice(1);
   document.querySelectorAll(".page").forEach(s=>s.classList.toggle("active",s.id==="page-"+PAGE));
   document.querySelectorAll("nav.main a").forEach(a=>{if(a.dataset.page===PAGE)a.setAttribute("aria-current","page");else a.removeAttribute("aria-current");});
-  refresh();window.scrollTo(0,0);
+  refresh();
+  // deep-link targets, after render
+  if(PAGE==="explorer"&&SUB==="map"&&ARG&&KMap.byId[ARG])setTimeout(()=>KMap.gotoComp(ARG),30);
+  else if(PAGE==="explorer"&&SUB==="feature"&&ARG)setTimeout(()=>{const d=document.querySelector(`details.acc[data-acc="${ARG}"]`);if(d){d.open=true;bdOpen.add(ARG);d.scrollIntoView({behavior:"smooth",block:"start"});}},30);
+  else if(PAGE==="reference"&&SUB&&REF_ANCHOR[SUB])setTimeout(()=>{const t=$(REF_ANCHOR[SUB]);if(t)t.scrollIntoView({block:"start"});if(SUB==="search")$("rs-q").focus({preventScroll:true});},30);
+  else if(PAGE==="deploy"&&SUB)setTimeout(()=>{const c=document.querySelector(`.dp-card[data-opt="${SUB}"]`);if(c){c.open=true;c.scrollIntoView({block:"start"});}},30);
+  else if(pageChanged)window.scrollTo(0,0);
 }
+function renderExplorer(){
+  const sub=SUB==="map"?"map":"breakdown";
+  document.querySelectorAll(".subnav a").forEach(a=>a.setAttribute("aria-selected",a.dataset.sub===sub));
+  $("ex-breakdown").classList.toggle("active",sub==="breakdown");$("explorer-map").classList.toggle("active",sub==="map");
+  if(sub==="map")KMap.refresh();else renderBreakdown();
+}
+function renderReference(){
+  renderValidation();KRef.renderSearch(SUB==="search"?ARG:null);
+}
+function scenLabel(){return (currentPreset?PRESETS[currentPreset].t:"Custom settings")+" · "+["Low","Base","High"][BAND]+" case";}
 function refresh(){
   const m=modifiedParts();
   $("estbar").innerHTML="Planning estimates built from public prices and assumed usage. Not AWS bills, quotes or production measurements."+(m.any?` <span class="mod">· Prices or assumptions edited in this browser (Reset restores defaults).</span>`:"");
-  ({overview:renderOverview,simulator:render,breakdown:renderBreakdown,architecture:()=>KMap.refresh(),assumptions:()=>{},validation:renderValidation})[PAGE]();
+  ({overview:renderOverview,simulator:render,explorer:renderExplorer,deploy:()=>KDeploy.render(),reference:renderReference})[PAGE]();
 }
 
 /* ===================== 1. OVERVIEW ===================== */
+let OVM=0;
+const ovOpen=new Set();
+KRef.deidOnceSaving=r=>V.comprehendOn&&!V.deidOnce?r.total-month({...V,deidOnce:true},A,r.m).total:0;
 function renderOverview(){
-  const a=aBase(), C=CATC();
-  const S={};Object.entries(PRESETS).forEach(([k,p])=>{const v={...V0,...p.v};S[k]={t:p.t,v,R:runWith(v,a),lo:scen(allAt(0),null,v),hi:scen(allAt(2),null,v)};});
-  const sm=S.small, gr=S.growing, lg=S.larger;
-  const fixed=sm.R[0].cat["Infrastructure"]||0;
-  $("ov-kpis").innerHTML=[
-   ["big",money0(sm.R[0].total)+"/mo","Small pilot, base case","10 users, no growth"],
-   ["",money0(sm.lo[0].total)+" – "+money0(sm.hi[0].total),"Small pilot, Low – High","Outer limits: every uncertain input low or high together"],
-   ["",money0(gr.R[0].total)+" → "+money0(gr.R[11].total),"Growing pilot, month 1 → 12","50 users, +15% a month"],
-   ["",money0(sum12(gr.R)),"Growing pilot, 12-month total","Base case; Low – High "+money0(sum12(gr.lo))+" – "+money0(sum12(gr.hi))],
-   ["",Math.round(100*fixed/sm.R[0].total)+"%","Fixed infrastructure share, Small pilot",money0(fixed)+"/mo runs whether or not anyone uses the app"]]
-   .map(([c,v,l,s])=>`<div class="kpi ${c}"><div class="v">${v}</div><div class="l">${l}</div><div class="s">${s}</div></div>`).join("");
+  // Follows the Simulator's settings (the active scenario); the trend chart compares the presets.
+  const R=run(V), r=R[OVM], m1=R[0], m12=R[11];
+  const lo=scen(allAt(0)), hi=scen(allAt(2));
+  const fixed=KRef.lineSum(r,KRef.FIXED_KEYS), usage=r.total-fixed;
+  const pre=currentPreset?PRESETS[currentPreset].t:"Custom settings";
+  $("ov-hero").innerHTML=`<div class="hero-main"><span class="small">Projected monthly cost · month ${OVM+1}</span>
+     <div class="hero-v" id="ov-total">${money(r.total)}<small>/mo</small></div>
+     <div class="hero-scen"><span class="chip">${pre}</span><span class="chip">${num(r.users)} users</span><span class="chip">${["Low","Base","High"][BAND]} assumptions</span><a href="#simulator">Change →</a></div></div>
+   <div class="hero-kpis" id="ov-kpis">
+     <div><span class="small">Low – High range, month ${OVM+1}</span><b class="v">${money(lo[OVM].total)} – ${money(hi[OVM].total)}</b><span class="small">Every uncertain input low or high together</span></div>
+     <div><span class="small">Month 1 → month 12</span><b class="v">${money(m1.total)} → ${money(m12.total)}</b><span class="small">${V.growth?`+${V.growth}% users a month`:"No user growth"}</span></div>
+     <div><span class="small">12-month total</span><b class="v">${money(sum12(R))}</b><span class="small">Low – High ${money(sum12(lo))} – ${money(sum12(hi))}</span></div>
+   </div>`;
+  // drivers
+  const T=r.total, D=KRef.DRV.map(d=>({d,v:KRef.lineSum(r,d.lines)})).filter(x=>x.v>0).sort((a,b)=>b.v-a.v);
+  const asLink=id=>{const x=AS.find(a=>a[0]===id);return x?`<li>${x[2]}: <b>${num(A[id],2)}</b> ${x[6]} ${badge(x[7])}</li>`:"";};
+  const inLink=k=>`<li>${IN[k].l}: <b>${IN[k].type==="chk"?(V[k]?"on":"off"):IN[k].fmt(V[k])}</b> <span class="small">Simulator input</span></li>`;
+  $("ov-drivers").innerHTML=`<div class="drivers">`+D.map(({d,v},i)=>{const opps=d.opps(r);
+    return `<details class="drv-i${i>=6?" more":""}" data-drv="${d.id}"${ovOpen.has(d.id)?" open":""}><summary>
+      <span class="drv-t"><b>${d.t}</b><span class="kchip k-${d.kind}">${d.kind==="fixed"?"Fixed":"Usage-based"}</span></span>
+      <span class="drv-v"><b>${money(v)}</b><span class="small">${T?Math.round(100*v/T):0}%</span></span>
+      <span class="drv-bar"><i style="width:${Math.max(1,100*v/D[0].v)}%" class="k-${d.kind}"></i></span></summary>
+      <div class="drv-body"><dl>
+        <dt>What it is</dt><dd>${d.what}</dd><dt>Why Karyio needs it</dt><dd>${d.why}</dd><dt>Used by</dt><dd>${d.feats}</dd>
+        <dt>Why the cost ${d.kind==="fixed"?"stays flat":"grows"}</dt><dd>${d.grows}</dd>
+        ${(d.as||[]).length||(d.inp||[]).length?`<dt>Assumptions behind it</dt><dd><ul class="tight">${(d.inp||[]).map(inLink).join("")}${(d.as||[]).map(asLink).join("")}</ul></dd>`:""}
+        ${opps.length?`<dt>Optimization opportunities</dt><dd><ul class="tight">${opps.map(o=>`<li>${o}</li>`).join("")}</ul>${d.id==="comprehend"?`<p class="small">${KRef.PRIVACY_NOTE}</p>`:""}</dd>`:""}
+      </dl><div class="drv-links"><a class="btn btn-sm" href="#explorer/map/${d.node}">Open in Cost Explorer</a><a class="btn btn-sm" href="#reference/search/${encodeURIComponent(d.q)}">View pricing source</a></div></div></details>`;}).join("")+`</div>`+
+    (D.length>6?`<button type="button" class="btn btn-sm" id="drvMore" aria-expanded="false">Show all ${D.length} drivers</button>`:"");
+  document.querySelectorAll("#ov-drivers details").forEach(d=>d.addEventListener("toggle",()=>{d.open?ovOpen.add(d.dataset.drv):ovOpen.delete(d.dataset.drv);}));
+  const mb=$("drvMore");if(mb)mb.onclick=()=>{const on=mb.getAttribute("aria-expanded")!=="true";$("ov-drivers").classList.toggle("all",on);mb.setAttribute("aria-expanded",on);mb.textContent=on?"Show fewer":`Show all ${D.length} drivers`;};
+  // fixed vs usage
+  $("ov-split").innerHTML=`<div class="stackbar" role="img" aria-label="Fixed ${money(fixed)}, usage-based ${money(usage)}"><span style="flex:${fixed};background:${cssv("--c5")}"></span><span style="flex:${usage};background:${cssv("--c6")}"></span></div>
+   <div class="split-l"><div><i style="background:${cssv("--c5")}"></i><span><b>${money(fixed)}</b> fixed (${Math.round(100*fixed/T)}%)<span class="small">Servers, database, network, storage, Apple fee</span></span></div>
+   <div><i style="background:${cssv("--c6")}"></i><span><b>${money(usage)}</b> usage-based (${Math.round(100*usage/T)}%)<span class="small">AI models, privacy scans, sign-in email</span></span></div></div>`;
+  const a=aBase(), S={};Object.entries(PRESETS).forEach(([k,p])=>{const v={...V0,...p.v};S[k]={R:runWith(v,a),lo:scen(allAt(0),null,v),hi:scen(allAt(2),null,v)};});
   legend("ov-lg-trend",[["Growing pilot",cssv("--c2")],["Small pilot",cssv("--c1")],["Growing Low–High",cssv("--c2")+"55"]]);
-  lines("ov-trend",MON,[{name:"Growing pilot",color:cssv("--c2"),values:gr.R.map(r=>r.total),w:3},{name:"Small pilot",color:cssv("--c1"),values:sm.R.map(r=>r.total)}],
-    {band:{lo:gr.lo.map(r=>r.total),hi:gr.hi.map(r=>r.total),color:cssv("--c2")}});
-  legend("ov-lg-mix",CATS.map(c=>[c,C[c]]));
-  const cols=[["Small M1",sm.R[0]],["Growing M1",gr.R[0]],["Growing M12",gr.R[11]]];
-  stacked("ov-mix",cols.map(x=>x[0]),CATS.map(c=>({name:c,color:C[c],values:cols.map(x=>x[1].cat[c]||0)})),{totals:true});
-  const g12=gr.R[11], items={};
-  Object.entries(g12.c).forEach(([k,x])=>{const lab=x.cat==="De-identification"?"Comprehend Medical (all steps)":x.model+(x.feat!=="Shared"?" · "+x.feat:"");items[lab]=items[lab]||{label:lab,value:0,color:x.cat==="De-identification"?cssv("--c6"):(x.prov==="AWS"?cssv("--c1"):PROVC()[x.prov])};items[lab].value+=x.val;});
-  hbars("ov-drivers",Object.values(items).sort((a,b)=>b.value-a.value).slice(0,8),{l:210,pct:g12.total});
-  const unver=PR.filter(r=>r[4]!=="official");
-  const unverAmt=Object.entries(sm.R[0].c).filter(([k])=>["rds","ec2","rdsSt","rdsBk","s3","cw","xfer"].includes(k)).reduce((s,[,x])=>s+x.val,0);
-  const fgOne=(V0.vcpu*P.fgVcpu+V0.mem*P.fgGb)*730, pend=pendingTechDphi(sm.R[0],a);
-  $("ov-uncertain").innerHTML=`<ul class="tight">
-   <li>${badge("assumed")} <b>Usage per person</b> (messages, voice minutes, care logs, daily-active share). There's no pilot data yet, and every usage cost scales with it.</li>
-   <li>${badge("assumed")} <b>How much text de-identification scans.</b> Comprehend Medical is the largest usage cost. Its price is verified; text lengths are assumed, and RAG lengths come from ${badge("synthetic")} tests.</li>
-   <li>${badge("assumed")} <b>Infrastructure sizing under load.</b> Never measured. A second backend task would add about ${money0(fgOne)}/mo.</li>
-   <li>${badge("secondary")} <b>${unver.length} prices not yet confirmed on AWS's official pages</b> (RDS, EC2, EBS, S3 and others), about ${money0(unverAmt)}/mo of the Small pilot.</li>
-   <li>${badge("pending")} <b>A planned de-identification change</b> may add about ${money(pend.cost)}/mo to the Small pilot. Not in the totals until its implementation is verified.</li></ul>`;
+  lines("ov-trend",MON,[{name:"Growing pilot",color:cssv("--c2"),values:S.growing.R.map(r=>r.total),w:3},{name:"Small pilot",color:cssv("--c1"),values:S.small.R.map(r=>r.total)}],
+    {band:{lo:S.growing.lo.map(r=>r.total),hi:S.growing.hi.map(r=>r.total),color:cssv("--c2")},h:240});
+  // risks: swings computed live, one factor at a time
+  const base=scen(allAt(1))[OVM].total, sw=k=>scen({...allAt(1),[k]:2})[OVM].total-scen({...allAt(1),[k]:0})[OVM].total;
+  const fgOne=(V.vcpu*P.fgVcpu+V.mem*P.fgGb)*730, pend=pendingTechDphi(r);
+  const unverAmt=Object.entries(r.c).filter(([k])=>["rds","ec2","rdsSt","rdsBk","s3","cw","xfer"].includes(k)).reduce((s,[,x])=>s+x.val,0);
+  const risks=[
+   [sw("freq"),`${badge("assumed")} <b>Usage per person</b> (messages, voice minutes, care logs). No pilot data yet; low to high moves this month by ${money(sw("freq"))}.`,"#reference/uncertainty"],
+   [sw("phi"),`${badge("assumed")} <b>Text scanned for privacy.</b> The DetectPHI price is official; message, reply and log lengths aren't. Swing ${money(sw("phi"))}.`,"#reference/search/privacy"],
+   [sw("tok"),`${badge("measured")} <b>AI token sizes.</b> Partly dev-measured, partly assumed. Swing ${money(sw("tok"))}.`,"#reference/usage"],
+   [fgOne,`${badge("code")} <b>A second backend task under load.</b> Autoscaling allows it; it would add up to ${money(fgOne)}/mo and isn't in the range.`,"#explorer/map/backend"],
+   [pend.cost,`${badge("pending")} <b>Planned privacy update for RAG questions</b> may add up to ${money(pend.cost)}/mo. Not in the totals until verified.`,"#explorer/feature/chatrag"],
+   [unverAmt*0.3,`${badge("secondary")} <b>${PR.filter(x=>x[4]!=="official").length} prices not yet official</b> (RDS, EC2, EBS, S3…), ${money(unverAmt)}/mo of this month.`,"#reference/prices"]
+  ].sort((x,y)=>y[0]-x[0]);
+  $("ov-risks").innerHTML=`<ul class="risk">${risks.map(([,t,h])=>`<li>${t} <a href="${h}">Details</a></li>`).join("")}<li>${badge("pending")} <b>Sign-in email limit.</b> The built-in Cognito email is capped per day; set up SES before external testers join. Readiness, not cost. <a href="#reference/search/email">Details</a></li></ul>
+   <p class="small">Base this month ${money(base)}. Swings move one kind of uncertainty from low to high.</p>`;
+  // opportunities: evidence-based only
+  const dSave=KRef.deidOnceSaving(r), aws2=KDeploy.OPT[1].host(r,V).lo, awsH=KDeploy.OPT[0].host(r,V).lo;
+  $("ov-opps").innerHTML=`<ul class="opp">
+   <li><b>Scan each message once per turn</b> <span class="kchip k-usage">${dSave?moneyD(-dSave)+"/mo":"n/a"}</span><span class="small">Today the same text is de-identified more than once: a message at the route decision and again when the reply is written, and an AI log draft with no type named. Reusing the first result needs a code change and keeps the same protection (the model's existing what-if). ${badge("code")}</span></li>
+   <li><b>ARM (Graviton) builds on AWS</b> <span class="kchip k-fixed">${moneyD(aws2-awsH)}/mo</span><span class="small">Same architecture, about 20% lower compute rates (official) and an ARM RAG host (secondary price). <a href="#deploy/aws2">Option A2</a></span></li>
+   <li><b>Right-size after measuring</b> <span class="kchip">not quantified</span><span class="small">CPU and memory under real load haven't been measured; the deployment plan already calls for it.</span></li>
+   <li><b>Moving hosting off AWS</b> <span class="kchip">at most ≈ ${money(awsH-KDeploy.OPT[3].host(r,V).lo)}/mo</span><span class="small">Shifts database, backups and patching to the team, and the privacy-agreement paths are less clear. <a href="#deploy">Compare options</a></span></li></ul>
+   <p class="small">${KRef.PRIVACY_NOTE}</p>`;
   const m=modifiedParts();
-  $("ov-note").innerHTML=`Overview figures use each preset with base-case assumptions, independent of the Simulator sliders.${m.any?" <span class=\"mod\">Prices or assumptions were edited on Assumptions &amp; Pricing, so these figures differ from the published defaults.</span>":""} Larger-usage preset (500 users): ${money0(lg.R[0].total)} → ${money0(lg.R[11].total)} a month; its infrastructure sizing is unmeasured.`;
+  $("ov-note").innerHTML=`Figures follow the Cost Simulator's settings (${scenLabel()}). The trend chart always compares the presets at base assumptions.${m.any?` <span class="mod">Prices or assumptions were edited in Reference &amp; Validation, so these figures differ from the published defaults.</span>`:""}`;
 }
 
 /* ===================== 2. SIMULATOR ===================== */
+// Units shown beside the number boxes (display only; the model's inputs are unchanged)
+const UNIT={users:"users",growth:"% / month",daily:"%",chat:"per day",voiceMin:"min / day",tpm:"turns / min",logs:"per day",ragPct:"%",tasks:"tasks",vcpu:"vCPU",mem:"GB",ips:"addresses",rdsAlloc:"GB",rdsMax:"GB",retain:"months (0 = forever)",logRet:"days"};
 function buildInputs(){
   const groups={};Object.entries(IN).forEach(([k,o])=>(groups[o.g]=groups[o.g]||[]).push([k,o]));
+  const intOnly=o=>Number.isInteger(o.step)&&Number.isInteger(o.min);
   $("inputs").innerHTML=Object.entries(groups).map(([g,list],gi)=>`<details class="grp" ${gi<(matchMedia("(max-width:960px)").matches?1:3)?"open":""}><summary>${g}</summary>`+list.map(([k,o])=>o.type==="chk"
     ?`<div class="ctl chk"><label><input type="checkbox" id="in-${k}" ${V[k]?"checked":""}>&nbsp;${o.l}</label>${o.hint?`<div class="hint">${o.hint}</div>`:""}</div>`
-    :`<div class="ctl"><label for="in-${k}"><span>${o.l}</span><b id="o-${k}">${o.fmt(V[k])}</b></label><input type="range" id="in-${k}" min="${o.min}" max="${o.max}" step="${o.step}" value="${V[k]}">${o.hint?`<div class="hint">${o.hint}</div>`:""}</div>`).join("")+`</details>`).join("")+
-    `<p class="small" style="margin:8px 0 0">Token sizes, row sizes and other uncertain values are in <a href="#assumptions">Assumptions &amp; Pricing</a>.</p>`;
-  Object.entries(IN).forEach(([k,o])=>{const e=$("in-"+k);e.addEventListener("input",()=>{V[k]=o.type==="chk"?e.checked:+e.value;if(o.fmt)$("o-"+k).textContent=o.fmt(V[k]);markPreset(null);render();});});
+    :`<div class="ctl"><label for="n-${k}">${o.l}</label>
+      <div class="ctl-row"><input type="range" id="in-${k}" min="${o.min}" max="${o.max}" step="${o.step}" value="${V[k]}" aria-label="${o.l} slider">
+      <span class="numbox"><input type="number" id="n-${k}" inputmode="${intOnly(o)?"numeric":"decimal"}" min="${o.min}" max="${o.max}" step="any" value="${V[k]}" aria-describedby="e-${k}"><span class="unit">${UNIT[k]||""}</span></span></div>
+      <div class="ctl-err" id="e-${k}" aria-live="polite"></div>${o.hint?`<div class="hint">${o.hint}</div>`:""}</div>`).join("")+`</details>`).join("")+
+    `<p class="small" style="margin:8px 0 0">Token sizes, row sizes and other uncertain values are in <a href="#reference/usage">Reference &amp; Validation</a>.</p>`;
+  Object.entries(IN).forEach(([k,o])=>{const e=$("in-"+k);
+    if(o.type==="chk"){e.addEventListener("input",()=>{V[k]=e.checked;markPreset(null);render();});return;}
+    const n=$("n-"+k), err=$("e-"+k), ctl=n.closest(".ctl");
+    const setErr=t=>{err.textContent=t;ctl.classList.toggle("bad",!!t);};
+    e.addEventListener("input",()=>{V[k]=+e.value;n.value=V[k];setErr("");markPreset(null);render();});
+    // Typing: accept only valid values; never overwrite the box while the user is typing
+    n.addEventListener("input",()=>{const t=n.value.trim(),x=Number(t);
+      if(t===""||!isFinite(x)){setErr("Enter a number");return;}
+      if(x<o.min||x>o.max){setErr(`Between ${o.min} and ${o.max} ${UNIT[k]||""}`.trim());return;}
+      if(intOnly(o)&&!Number.isInteger(x)){setErr("Whole numbers only");return;}
+      setErr("");V[k]=x;e.value=x;markPreset(null);render();});
+    n.addEventListener("change",()=>{if(ctl.classList.contains("bad")){n.value=V[k];setErr("");}});
+  });
 }
-function syncInputs(){Object.entries(IN).forEach(([k,o])=>{const e=$("in-"+k);if(o.type==="chk")e.checked=V[k];else{e.value=V[k];$("o-"+k).textContent=o.fmt(V[k]);}});}
+function syncInputs(){Object.entries(IN).forEach(([k,o])=>{const e=$("in-"+k);if(o.type==="chk")e.checked=V[k];else{e.value=V[k];const n=$("n-"+k);if(!(document.activeElement===n&&Number(n.value)===V[k]))n.value=V[k];$("e-"+k).textContent="";n.closest(".ctl").classList.remove("bad");}});}
 function markPreset(id){currentPreset=id;document.querySelectorAll("#presetSeg button").forEach(b=>b.setAttribute("aria-pressed",b.dataset.p===id));}
 function syncBand(){document.querySelectorAll("[data-band-seg] button").forEach(x=>x.setAttribute("aria-pressed",+x.dataset.b===BAND));}
 function buildTop(){
@@ -166,7 +246,7 @@ function render(){
   $("tb-voice").innerHTML=`<table>
    <tr><td>Voice turns per month</td><td class="n">${num(m1.voice)}</td></tr>
    <tr><td>Share of all turns</td><td class="n">${Math.round(100*voiceShare(m1))}%</td></tr>
-   <tr><td>Speech recognition &amp; read-aloud</td><td class="n">$0 (on-device)</td></tr>
+   <tr><td>Speech recognition &amp; read-aloud</td><td class="n">$0.00 (on-device)</td></tr>
    <tr><td>Cost attributable to voice</td><td class="n">${money(voiceCost(m1))}</td></tr>
    <tr><td>Per voice minute</td><td class="n">${money(m1.voice?voiceCost(m1)/(m1.dau*V.voiceMin*DAYS||1):0)}</td></tr></table>
    <p class="small">Voice in a TestFlight build is planned. Shared infrastructure isn't attributed to voice.</p>`;
@@ -250,17 +330,20 @@ const BDF=[
   subs:{"Chat":"Routing each message, writing replies, chat titles, privacy scans","RAG":"Medical questions: safety checks, guide search, cited answers, plus the dedicated RAG host","Memory":"Summary of each turn (with a privacy scan of question + reply) and recall"},
   unit:r=>r.turns?[r.turns,"per chat turn"]:null,
   drivers:[["Twice as many typed messages",v=>({chat:v.chat*2})],["Twice as many voice minutes",v=>({voiceMin:v.voiceMin*2})],["RAG share +10 points",v=>({ragPct:Math.min(100,v.ragPct+10)})],["Twice as many users",users2]],
-  overlap:"Includes the cost of spoken turns. The Voice view is a slice of this figure, not an extra cost. The route decision and memory summary of RAG turns are counted under Chat and Memory."},
+  overlap:"Includes the cost of spoken turns. The Voice view is a slice of this figure, not an extra cost. The route decision and memory summary of RAG turns are counted under Chat and Memory.",
+  cov:{inc:"Route decision, replies, titles, recall, memory summaries and embeddings, RAG safety screen, analysis, search, re-ranking and answers, OpenAI failover, privacy scans at each step, and the RAG host.",exc:"The multi-step loop route (off in the pilot), a RAG conflict-check step (switched off in configuration), and rare fallback paths.",unv:"Token sizes beyond the ordinary route; Groq failover rate; the planned privacy update for RAG questions (pending, shown separately).",conf:"Medium. Prices are official and call paths are code-checked; usage is assumed."}},
  {id:"logs",t:"Care Logs & Insights",short:"Recording care, and background insights",feats:["Care logs","Care Insights"],color:"--c3",
   what:"Recording symptoms, medications and events, with optional AI help, plus the background Care Insights agent that looks for patterns in recent logs.",
   subs:{"Care logs":"AI drafting, summaries of notes, memory embeddings and privacy scans","Care Insights":"Judge, investigator and critic runs; re-scans log notes"},
   unit:r=>r.logs?[r.logs,"per care log"]:null,
   drivers:[["Twice as many care logs",v=>({logs:v.logs*2})],["Twice as many users",users2]],
-  overlap:"No overlap: log memory and log privacy scans are counted only here, not under Chat & RAG."},
+  overlap:"No overlap: log memory and log privacy scans are counted only here, not under Chat & RAG.",
+  cov:{inc:"AI drafting and extraction, note summaries, memory embeddings, Care Insights judge, investigator and critic, and privacy scans on save, drafting, follow-ups and insight runs.",exc:"Weekly reports (no AI call today) and an insight-synthesis step that isn't enabled in the pilot.",unv:"AI drafting may make a few more small model calls per log than modeled (type classification, follow-up answers, review). Care Insights triggers per care area, so runs per log could be higher than base (covered by the High case).",conf:"Medium–Low. Shares and token sizes are assumed."}},
  {id:"login",t:"Sign-in & email",short:"Accounts and verification emails",feats:["Login"],color:"--c6",
   what:"Account sign-up, sign-in and password recovery (Cognito), plus verification and recovery emails.",
   note:"Projected for the planned setup; login integration is in progress. Cognito is free below 10,000 monthly active users, so at pilot scale only emails cost anything: 2 per new user at $0.10 per 1,000.",
-  drivers:[["Twice as many users",users2]],overlap:"No overlap."},
+  drivers:[["Twice as many users",users2]],overlap:"No overlap.",
+  cov:{inc:"Cognito (free below 10,000 monthly active users) and 2 emails per new user at the SES rate.",exc:"SMS and email MFA messages, and a custom sender domain.",unv:"The deployment scripts currently use Cognito's built-in email: free, but capped per day at a level AWS says is below typical production volume. Set up SES before external testers join. This is a readiness item; the cost impact is under $0.01.",conf:"High for cost."}},
  {id:"dist",t:"App distribution",short:"Apple Developer Program",feats:["Distribution"],color:"--c5",
   what:"Apple Developer Program membership, needed to distribute the app through TestFlight.",
   note:"$99 a year spread monthly. Fixed: it doesn't change with usage. Turn it off with “Include Apple Developer fee” in the Simulator.",
@@ -268,17 +351,21 @@ const BDF=[
 ];
 const lineName=(k,x)=>x.cat==="De-identification"?`Privacy scan: ${DSITES[k].n}`:`${x.model}${WHY[k]?` <span class="small">· ${WHY[k]}</span>`:""}`;
 const featCost=(r,fs)=>Object.values(r.c).filter(x=>fs.includes(x.feat)).reduce((s,x)=>s+x.val,0);
+const ragFixed=r=>(r.c.ec2?r.c.ec2.val:0)+(r.c.s3?r.c.s3.val:0);
 function driverRows(list,costFn,base){
   if(!list.length)return `<p class="small">Doesn't change with usage.</p>`;
   return `<ul class="drv">${list.map(([l,o])=>{const c=costFn(month({...V,...o(V)},A,BDM)),d=c-base;
-    return `<li><span>${l}</span><b class="${d>0.005?"up":""}">${d>=0.005?"+":d<=-0.005?"−":"±"}${money(Math.abs(d))}<small>/mo</small>${base>0.005&&Math.abs(d)>=0.005?` <span class="small">(${d>0?"+":"−"}${Math.round(100*Math.abs(d)/base)}%)</span>`:""}</b></li>`;}).join("")}</ul>`;
+    return `<li><span>${l}</span><b class="${d>=0.01?"up":""}">${moneyD(d)}<small>/mo</small>${base>=0.01&&Math.abs(d)>=0.01?` <span class="small">(${d>0?"+":"−"}${Math.round(100*Math.abs(d)/base)}%)</span>`:""}</b></li>`;}).join("")}</ul>`;
 }
 function featDetail(f,r,sharedNames){
   const items=Object.entries(r.c).filter(([,x])=>f.feats.includes(x.feat)), tot=items.reduce((s,[,x])=>s+x.val,0);
   const bySvc={};items.forEach(([,x])=>{const k=x.cat==="De-identification"?"AWS · Comprehend Medical (privacy scans)":`${x.prov} · ${x.model}`;bySvc[k]=(bySvc[k]||0)+x.val;});
   const u=f.unit&&f.unit(r);
   return `<p>${f.what}</p>${f.note?`<p class="note-box">${f.note}</p>`:""}
-   ${f.subs?`<h4>What's inside</h4><ul class="kv">${Object.entries(f.subs).map(([k,d])=>`<li><span><b>${k==="RAG"?"Medical RAG":k}</b><span class="small">${d}</span></span><b>${money(featCost(r,[k]))}</b></li>`).join("")}</ul>`:""}
+   ${f.subs?`<h4>What's inside</h4><ul class="kv">${Object.entries(f.subs).map(([k,d])=>k==="RAG"
+     ?`<li><span><b>Medical RAG · per question</b><span class="small">Safety checks, guide search, re-ranking and cited answers. Variable: grows with RAG questions</span></span><b>${money(featCost(r,["RAG"])-ragFixed(r))}</b></li><li><span><b>Medical RAG · hosting</b><span class="small">The dedicated RAG host and its search bundle. Fixed: runs whether or not anyone asks</span></span><b>${money(ragFixed(r))}</b></li>`
+     :`<li><span><b>${k}</b><span class="small">${d}</span></span><b>${money(featCost(r,[k]))}</b></li>`).join("")}</ul>`:""}
+   ${f.cov?`<h4>Coverage</h4><div class="cov-grid"><div><b>Included</b><p class="small">${f.cov.inc}</p></div><div><b>Excluded from forecast</b><p class="small">${f.cov.exc}</p></div><div><b>Not yet verified</b><p class="small">${f.cov.unv}</p></div><div><b>Confidence</b><p class="small">${f.cov.conf}</p></div></div><p class="small"><a href="#reference/coverage">Full coverage matrix →</a></p>`:""}
    <h4>Services it pays for directly</h4><ul class="kv">${Object.entries(bySvc).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<li><span>${k}</span><b>${money(v)}</b></li>`).join("")}</ul>
    ${u?`<p class="small">≈ $${(tot/u[0]).toFixed(4)} ${u[1]} (${num(u[0])} this month).</p>`:""}
    <h4>Shared services it relies on</h4><p class="small">${sharedNames}. These are counted once under Shared infrastructure, not here.</p>
@@ -293,7 +380,8 @@ function voiceDetail(r,vc){
   return `<p>Speaking instead of typing. Speech-to-text and read-aloud run on the iPhone at no charge. Voice costs money only because each spoken message becomes a chat turn, with the same AI, privacy and memory steps.</p>
    <p class="note-box"><b>Not added to the total.</b> This is the share of Chat &amp; RAG triggered by spoken turns (${Math.round(100*vs)}% of turns this month), calculated by the model as voice turns ÷ all turns × per-turn costs. It's already inside the Chat &amp; RAG figure.</p>
    <h4>Where the voice share goes</h4><ul class="kv">${Object.entries(parts).sort((a,b)=>b[1]-a[1]).map(([k,v])=>`<li><span>${k}</span><b>${money(v)}</b></li>`).join("")}</ul>
-   <p class="small">${num(r.voice)} voice turns this month; speech recognition and read-aloud cost $0.</p>
+   <p class="small">${num(r.voice)} voice turns this month; speech recognition and read-aloud cost $0.00.</p>
+   <h4>Coverage</h4><p class="small">Code check: speech-to-text and read-aloud use Apple's on-device frameworks, and spoken turns go through the same chat path as typed ones. No paid speech API is used, so nothing is missing and nothing is double-counted. Not yet verified: voice minutes, turns per minute, and whether voice sessions create extra chat titles.</p>
    <h4>How it responds to the Simulator inputs</h4>${driverRows([["Twice as many voice minutes",v=>({voiceMin:v.voiceMin*2})],["One more turn per voice minute",v=>({tpm:Math.min(6,v.tpm+1)})],["Twice as many users",users2]],m=>voiceCost(m),vc)}
    <p class="small">Voice isn't in a TestFlight build yet; these figures assume the planned release.</p>`;
 }
@@ -431,7 +519,9 @@ $("shareBtn").onclick=share;
 document.addEventListener("click",e=>{const b=e.target.closest("[data-to]");if(b){const t=$(b.dataset.to);if(t)t.scrollIntoView({behavior:"smooth",block:"start"});}});
 $("resetBtn").onclick=resetAll;
 document.querySelectorAll("#bdMonth button").forEach(b=>b.onclick=()=>{BDM=+b.dataset.m;document.querySelectorAll("#bdMonth button").forEach(x=>x.setAttribute("aria-pressed",x===b));renderBreakdown();});
+document.querySelectorAll("#ovMonth button").forEach(b=>b.onclick=()=>{OVM=+b.dataset.m;document.querySelectorAll("#ovMonth button").forEach(x=>x.setAttribute("aria-pressed",x===b));renderOverview();});
 matchMedia("(prefers-color-scheme: dark)").addEventListener?.("change",refresh);
 buildTop();buildInputs();buildPrices();buildAssume();buildSensCtl();buildMethod();
 KMap.initMap(()=>run(V));
+KDeploy.init();KRef.init(scenLabel);KRef.renderMethod();KRef.renderCoverage();
 KGate.onUnlock(()=>{window.addEventListener("hashchange",route);route();});
